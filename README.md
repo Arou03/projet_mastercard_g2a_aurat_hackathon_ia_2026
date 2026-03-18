@@ -1,0 +1,1 @@
+# projet_mastercard_g2a_aurat_hackathon_ia_2026
