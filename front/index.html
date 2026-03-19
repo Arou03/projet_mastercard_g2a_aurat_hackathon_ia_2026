@@ -1,18 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Dashboard Hackathon</title>
+    <title>Dashboard AURA</title>
+
     <link rel="stylesheet" href="style.css">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
+
 <body>
 
-    <h1>Frontend Static Page</h1>
+<div class="layout">
 
-    <button onclick="callAPI()">Call Flask API</button>
+    <!-- CARTE -->
+    <div class="panel map-panel">
+        <h2>Carte AURA</h2>
+        <div class="map-frame">
+            <div id="map"></div>
+            <button id="dataToggle" class="map-toggle" type="button" title="Afficher les donnees">☰</button>
+            <div id="dataDrawer" class="map-drawer hidden">
+                <h3>Donnees carte</h3>
+                <label><input type="checkbox" class="kpi-filter" value="frequentation" checked> Indicateur frequentation</label>
+                <label><input type="checkbox" class="kpi-filter" value="meteo"> Indicateur meteo</label>
+                <label><input type="checkbox" class="kpi-filter" value="securite"> Indicateur securite</label>
+            </div>
+        </div>
+        <div id="legend" class="legend"></div>
+        <div id="mapResizeHandle" class="map-resize-handle" title="Redimensionner la carte"></div>
+    </div>
 
-    <p id="result">Result will appear here</p>
+    <!-- VISU -->
+    <div class="panel viz-panel">
+        <h2>Visualisations globales</h2>
+        <div class="debug-box">
+            <button id="debugToggle" class="debug-toggle" type="button">Console debug</button>
+            <pre id="debugConsole" class="debug-console hidden">Initialisation...</pre>
+        </div>
+        <p class="api-status" id="apiStatus">Chargement des donnees...</p>
+        <div id="viz" class="viz-placeholder">
+            Chargement des indicateurs...
+        </div>
+    </div>
 
-    <script src="script.js"></script>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="script.js"></script>
+
 </body>
 </html>

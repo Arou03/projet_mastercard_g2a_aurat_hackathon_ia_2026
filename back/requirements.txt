@@ -1,3 +1,5 @@
 flask
 flask-cors
 gunicorn
+snowflake-connector-python
+cryptography
