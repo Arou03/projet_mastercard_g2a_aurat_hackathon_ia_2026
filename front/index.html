@@ -22,9 +22,20 @@
             <button id="dataToggle" class="map-toggle" type="button" title="Afficher les donnees">☰</button>
             <div id="dataDrawer" class="map-drawer hidden">
                 <h3>Donnees carte</h3>
-                <label><input type="checkbox" class="kpi-filter" value="frequentation" checked> Indicateur frequentation</label>
-                <label><input type="checkbox" class="kpi-filter" value="meteo"> Indicateur meteo</label>
-                <label><input type="checkbox" class="kpi-filter" value="securite"> Indicateur securite</label>
+                <div class="drawer-section">
+                    <p class="drawer-title">Zones (1 choix max)</p>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="none"> Aucun remplissage</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="frequentation" checked> Frequentation</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="meteo"> Meteo</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="securite"> Securite</label>
+                </div>
+
+                <div class="drawer-section">
+                    <p class="drawer-title">Points stations (multi-selection)</p>
+                    <label><input type="checkbox" class="point-filter" value="Ski Alpin"> Ski Alpin</label>
+                    <label><input type="checkbox" class="point-filter" value="Ski Nordique"> Ski Nordique</label>
+                    <label><input type="checkbox" class="point-filter" value="Ski Alpin et Ski Nordique"> Ski Alpin et Ski Nordique</label>
+                </div>
             </div>
         </div>
         <div id="legend" class="legend"></div>
@@ -47,6 +58,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js"></script>
 <script src="script.js"></script>
 
 </body>

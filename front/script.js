@@ -8,7 +8,8 @@ const KPI_LABELS = {
     securite: "Securite"
 };
 
-const kpiFilters = Array.from(document.querySelectorAll(".kpi-filter"));
+const areaFilters = Array.from(document.querySelectorAll(".area-filter"));
+const pointFilters = Array.from(document.querySelectorAll(".point-filter"));
 const apiStatus = document.getElementById("apiStatus");
 const vizContainer = document.getElementById("viz");
 const legendContainer = document.getElementById("legend");
@@ -27,6 +28,21 @@ let geoData;
 let scoreByDepartment = {};
 let kpisByDepartment = {};
 let currentRange = { min: 0, max: 100 };
+let stationsData = null;
+let stationsLayer = null;
+
+const STATION_TYPE_STYLES = {
+    "Ski Alpin": { color: "#f97316" },
+    "Ski Nordique": { color: "#0ea5e9" },
+    "Ski Alpin et Ski Nordique": { color: "#10b981" }
+};
+
+if (window.proj4) {
+    proj4.defs(
+        "EPSG:2154",
+        "+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs"
+    );
+}
 
 function sourceLabel(source) {
     if (source === "snowflake") return "Snowflake";
@@ -105,11 +121,12 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 function style(feature) {
     const depName = feature.properties.nom;
     const value = scoreByDepartment[depName];
+    const showFill = Boolean(activeKpi);
     return {
-        fillColor: getColor(value, currentRange.min, currentRange.max),
+        fillColor: showFill ? getColor(value, currentRange.min, currentRange.max) : "transparent",
         weight: 1,
         color: "#ffffff",
-        fillOpacity: 0.75
+        fillOpacity: showFill ? 0.75 : 0
     };
 }
 
@@ -170,10 +187,19 @@ function onEachFeature(feature, layer) {
         }
     );
 
-    layer.bindPopup(`${depName}<br>${KPI_LABELS[activeKpi]}: ${value ?? "N/A"}`);
+    if (activeKpi) {
+        layer.bindPopup(`${depName}<br>${KPI_LABELS[activeKpi]}: ${value ?? "N/A"}`);
+    } else {
+        layer.bindPopup(depName);
+    }
 }
 
 function renderLegend() {
+    if (!activeKpi) {
+        legendContainer.innerHTML = `<strong>Aucun remplissage actif</strong><div class="legend-range">Carte departementale uniquement</div>`;
+        return;
+    }
+
     legendContainer.innerHTML = `
         <strong>${KPI_LABELS[activeKpi]}</strong>
         <div class="legend-scale">
@@ -188,6 +214,11 @@ function renderLegend() {
 }
 
 function renderSummary(departments, ranges) {
+    if (!activeKpi) {
+        vizContainer.innerHTML = "Selectionne un indicateur de zone ou affiche des points stations.";
+        return;
+    }
+
     const topDepartments = [...departments]
         .sort((a, b) => b.score - a.score)
         .slice(0, 5);
@@ -239,7 +270,76 @@ function renderGeoJson() {
     }).addTo(map);
 }
 
+function normalizeStationType(rawType) {
+    const value = (rawType || "").toLowerCase();
+    if (value.includes("alpin") && value.includes("nordique")) {
+        return "Ski Alpin et Ski Nordique";
+    }
+    if (value.includes("nordique")) {
+        return "Ski Nordique";
+    }
+    return "Ski Alpin";
+}
+
+function toLatLngFromLambert93(coordinates) {
+    if (!window.proj4 || !Array.isArray(coordinates) || coordinates.length < 2) {
+        return null;
+    }
+    const [lon, lat] = proj4("EPSG:2154", "EPSG:4326", coordinates);
+    return [lat, lon];
+}
+
+function renderStations() {
+    if (!stationsData || !stationsLayer) {
+        return;
+    }
+
+    const selectedTypes = pointFilters.filter(item => item.checked).map(item => item.value);
+    stationsLayer.clearLayers();
+
+    if (selectedTypes.length === 0) {
+        return;
+    }
+
+    stationsData.features.forEach(feature => {
+        const stationType = normalizeStationType(feature.properties.TYPE);
+        if (!selectedTypes.includes(stationType)) {
+            return;
+        }
+
+        const latLng = toLatLngFromLambert93(feature.geometry.coordinates);
+        if (!latLng) {
+            return;
+        }
+
+        const styleConfig = STATION_TYPE_STYLES[stationType] || STATION_TYPE_STYLES["Ski Alpin"];
+        L.circleMarker(latLng, {
+            radius: 5,
+            color: "#0f172a",
+            weight: 1,
+            fillColor: styleConfig.color,
+            fillOpacity: 0.9,
+        })
+            .bindPopup(
+                `<strong>${feature.properties.NOMSTATION}</strong><br>${stationType}<br>${feature.properties.REMARQUES || ""}`
+            )
+            .addTo(stationsLayer);
+    });
+}
+
 function fetchKpiData() {
+    if (!activeKpi) {
+        scoreByDepartment = {};
+        currentRange = { min: 0, max: 100 };
+        renderLegend();
+        renderSummary([], { avg: "-" });
+        renderGeoJson();
+        renderStations();
+        apiStatus.textContent = "Carte departementale sans remplissage (mode vierge)";
+        appendDebugLine("mode area", { selected: "none" });
+        return;
+    }
+
     apiStatus.textContent = `Chargement du KPI ${KPI_LABELS[activeKpi]}...`;
     fetch(`${API_URL}/api/data?kpi=${activeKpi}`)
         .then(res => {
@@ -254,6 +354,7 @@ function fetchKpiData() {
             renderLegend();
             renderSummary(payload.departments, payload.ranges);
             renderGeoJson();
+            renderStations();
             apiStatus.textContent = `Donnees synchronisees (${sourceLabel(payload.data_source)})`;
             if (payload.data_source === "mock" && payload.snowflake_error) {
                 apiStatus.textContent += ` - fallback: ${payload.snowflake_error}`;
@@ -297,34 +398,33 @@ function checkSnowflakeStatus() {
 }
 
 function initFilters() {
-    kpiFilters.forEach(input => {
+    areaFilters.forEach(input => {
         input.addEventListener("change", event => {
-            if (!event.target.checked) {
-                const checkedCount = kpiFilters.filter(item => item.checked).length;
-                if (checkedCount === 0) {
-                    event.target.checked = true;
-                    return;
-                }
-            }
-
-            kpiFilters.forEach(item => {
-                if (item !== event.target) {
-                    item.checked = false;
-                }
-            });
-
-            activeKpi = event.target.value;
+            const selected = event.target.value;
+            activeKpi = selected === "none" ? null : selected;
             fetchKpiData();
+        });
+    });
+
+    pointFilters.forEach(input => {
+        input.addEventListener("change", () => {
+            renderStations();
+            appendDebugLine("points filters", {
+                selected: pointFilters.filter(item => item.checked).map(item => item.value)
+            });
         });
     });
 }
 
 Promise.all([
     fetch("data/departements.geojson").then(res => res.json()),
+    fetch("data/stations.geojson").then(res => res.json()),
     fetch(`${API_URL}/api/hello`).then(res => res.json())
 ])
-    .then(([geojson]) => {
+    .then(([geojson, stationsGeojson]) => {
         geoData = geojson;
+        stationsData = stationsGeojson;
+        stationsLayer = L.layerGroup().addTo(map);
         initUiToggles();
         initPanelResize();
         checkSnowflakeStatus();

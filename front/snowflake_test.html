@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Connexion Snowflake - AURA Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 40px 30px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .status-loading {
+            background: #ffd700;
+            color: #333;
+        }
+
+        .status-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .status-error {
+            background: #f44336;
+            color: white;
+        }
+
+        .result-section {
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .result-section h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .json-output {
+            background: #0b1220;
+            color: #9ce6b4;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .json-key {
+            color: #ffd700;
+        }
+
+        .json-string {
+            color: #87ceeb;
+        }
+
+        .json-number {
+            color: #98fb98;
+        }
+
+        .json-boolean {
+            color: #ffb6c1;
+        }
+
+        .info-card {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-size: 13px;
+        }
+
+        .info-card strong {
+            color: #1976d2;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        table thead {
+            background: #e8eaf6;
+            font-weight: 600;
+        }
+
+        table th {
+            padding: 12px;
+            text-align: left;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+        }
+
+        table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .error-message {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-size: 13px;
+        }
+
+        .success-message {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-size: 13px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            background: #f5f5f5;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #eee;
+        }
+
+        .back-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                border-radius: 0;
+            }
+
+            .header {
+                padding: 30px 20px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+
+            .json-output {
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Test Connexion Snowflake</h1>
+            <p>AURA Dashboard - Pipeline de Données</p>
+        </div>
+
+        <div class="content">
+            <div class="button-group">
+                <button class="btn-primary" id="testBtn" onclick="runTest()">
+                    ▶ Lancer le Test
+                </button>
+                <button class="btn-secondary" id="clearBtn" onclick="clearResults()">
+                    🗑 Effacer Résultats
+                </button>
+                <button class="btn-secondary" onclick="goBack()">
+                    ← Retour au Dashboard
+                </button>
+            </div>
+
+            <div id="statusBadge" style="display: none;"></div>
+
+            <!-- Résultats -->
+            <div id="resultsContainer"></div>
+        </div>
+
+        <div class="footer">
+            <p>💡 Cette page teste la connexion Snowflake et affiche les données brutes de FREQ_GLOBALE</p>
+            <p style="margin-top: 10px;">
+                <a href="index.html" class="back-link">← Retour au Dashboard</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+        const resultsContainer = document.getElementById("resultsContainer");
+        const statusBadge = document.getElementById("statusBadge");
+        const testBtn = document.getElementById("testBtn");
+
+        function showStatus(message, type) {
+            statusBadge.className = `status-badge status-${type}`;
+            statusBadge.textContent = message;
+            statusBadge.style.display = 'block';
+        }
+
+        function createResultSection(title, content, type = 'info') {
+            const section = document.createElement('div');
+            section.className = 'result-section active';
+            section.innerHTML = `<h3>${title}</h3>${content}`;
+            return section;
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function formatJson(obj, indent = 0) {
+            if (obj === null) return '<span class="json-boolean">null</span>';
+            if (typeof obj === 'boolean') return `<span class="json-boolean">${obj}</span>`;
+            if (typeof obj === 'number') return `<span class="json-number">${obj}</span>`;
+            if (typeof obj === 'string') return `<span class="json-string">"${escapeHtml(obj)}"</span>`;
+
+            const spaces = '  '.repeat(indent);
+            const nextSpaces = '  '.repeat(indent + 1);
+
+            if (Array.isArray(obj)) {
+                if (obj.length === 0) return '[]';
+                const items = obj.map(item => `${nextSpaces}${formatJson(item, indent + 1)}`).join(',\n');
+                return `[\n${items}\n${spaces}]`;
+            }
+
+            if (typeof obj === 'object') {
+                const keys = Object.keys(obj);
+                if (keys.length === 0) return '{}';
+                const items = keys.map(key => 
+                    `${nextSpaces}<span class="json-key">"${key}"</span>: ${formatJson(obj[key], indent + 1)}`
+                ).join(',\n');
+                return `{\n${items}\n${spaces}}`;
+            }
+
+            return String(obj);
+        }
+
+        async function runTest() {
+            testBtn.disabled = true;
+            resultsContainer.innerHTML = '';
+            showStatus('⏳ Test en cours...', 'loading');
+
+            try {
+                const response = await fetch(`${API_URL}/api/snowflake/test/freq-globale`);
+                const data = await response.json();
+
+                if (data.success) {
+                    showStatus('✅ Connexion Réussie', 'success');
+                    displaySuccessResults(data);
+                } else {
+                    showStatus('❌ Erreur de Connexion', 'error');
+                    displayErrorResults(data);
+                }
+            } catch (error) {
+                showStatus('❌ Erreur Réseau', 'error');
+                const errorSection = createResultSection(
+                    '⚠️ Erreur Réseau',
+                    `<div class="error-message">
+                        <strong>Impossible de contacter l'API:</strong><br>
+                        ${escapeHtml(error.message)}
+                        <br><br>
+                        <em>Assurez-vous que le backend Render est en cours d'exécution et que l'URL est correcte.</em>
+                    </div>`
+                );
+                resultsContainer.appendChild(errorSection);
+            }
+
+            testBtn.disabled = false;
+        }
+
+        function displaySuccessResults(data) {
+            // Section 1: Détails de Connexion
+            const connDetails = `
+                <div class="success-message">
+                    ✅ Connexion Snowflake établie avec succès!
+                </div>
+                <div class="info-card">
+                    <strong>Compte:</strong> ${escapeHtml(data.connection_details.account)}<br>
+                    <strong>Utilisateur:</strong> ${escapeHtml(data.connection_details.user)}<br>
+                    <strong>Base de Données:</strong> ${escapeHtml(data.connection_details.database)}<br>
+                    <strong>Schéma:</strong> ${escapeHtml(data.connection_details.schema)}<br>
+                    <strong>Lignes Trouvées:</strong> ${data.freq_globale_row_count}
+                </div>
+            `;
+            resultsContainer.appendChild(createResultSection('🔌 Détails de Connexion', connDetails));
+
+            // Section 2: Tables Disponibles
+            if (data.available_tables && data.available_tables.length > 0) {
+                const tablesList = `<ul>${data.available_tables.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
+                resultsContainer.appendChild(createResultSection('📋 Tables Disponibles', tablesList));
+            }
+
+            // Section 3: Structure de FREQ_GLOBALE
+            if (data.freq_globale_columns && data.freq_globale_columns.length > 0) {
+                let columnsHtml = '<div class="info-card"><strong>Colonnes détectées:</strong><br>';
+                columnsHtml += data.freq_globale_columns.map(col => `• <code>${escapeHtml(col)}</code>`).join('<br>');
+                columnsHtml += '</div>';
+                resultsContainer.appendChild(createResultSection('🏗️ Structure FREQ_GLOBALE', columnsHtml));
+            }
+
+            // Section 4: Données Échantillon (Tableau)
+            if (data.freq_globale_sample && data.freq_globale_sample.length > 0) {
+                const firstRow = data.freq_globale_sample[0];
+                const headers = Object.keys(firstRow);
+                
+                let tableHtml = '<div class="table-wrapper"><table>';
+                tableHtml += '<thead><tr>' + headers.map(h => `<th>${escapeHtml(h)}</th>`).join('') + '</tr></thead>';
+                tableHtml += '<tbody>';
+                
+                data.freq_globale_sample.forEach(row => {
+                    tableHtml += '<tr>';
+                    headers.forEach(h => {
+                        const value = row[h];
+                        const displayValue = value === null ? '<em>NULL</em>' : escapeHtml(String(value));
+                        tableHtml += `<td>${displayValue}</td>`;
+                    });
+                    tableHtml += '</tr>';
+                });
+                
+                tableHtml += '</tbody></table></div>';
+                resultsContainer.appendChild(createResultSection('📊 Données Échantillon', tableHtml));
+            }
+
+            // Section 5: JSON Brut
+            const jsonSection = createResultSection(
+                '📄 Réponse JSON Complète',
+                `<div class="json-output"><pre>${formatJson(data)}</pre></div>`
+            );
+            resultsContainer.appendChild(jsonSection);
+        }
+
+        function displayErrorResults(data) {
+            const errorMessage = `
+                <div class="error-message">
+                    <strong>Erreur Snowflake:</strong><br>
+                    ${escapeHtml(data.error)}<br><br>
+                    <strong>Type:</strong> ${escapeHtml(data.error_type || 'Unknown')}
+                </div>
+                <div class="info-card" style="background: #fff3e0; border-left-color: #ff9800; color: #e65100;">
+                    <strong>⚠️ Diagnostic:</strong><br>
+                    Vérifiez les variables d'environnement:<br>
+                    • SNOWFLAKE_ACCOUNT<br>
+                    • SNOWFLAKE_USER<br>
+                    • SNOWFLAKE_PRIVATE_KEY_B64<br>
+                    • SNOWFLAKE_DATABASE<br>
+                    • SNOWFLAKE_SCHEMA
+                </div>
+            `;
+            resultsContainer.appendChild(createResultSection('❌ Erreur', errorMessage));
+
+            // Afficher le traceback s'il existe
+            if (data.traceback) {
+                const tracebackHtml = `<div class="json-output"><pre>${escapeHtml(data.traceback)}</pre></div>`;
+                resultsContainer.appendChild(createResultSection('🔍 Traceback Complet', tracebackHtml));
+            }
+
+            // JSON brut pour debug
+            const jsonSection = createResultSection(
+                '📄 Réponse JSON Complète',
+                `<div class="json-output"><pre>${formatJson(data)}</pre></div>`
+            );
+            resultsContainer.appendChild(jsonSection);
+        }
+
+        function clearResults() {
+            resultsContainer.innerHTML = '';
+            statusBadge.style.display = 'none';
+        }
+
+        function goBack() {
+            window.location.href = 'index.html';
+        }
+
+        // Lancer le test automatiquement au chargement
+        window.addEventListener('load', () => {
+            // Facultatif: décommenter pour test automatique
+            // runTest();
+        });
+    </script>
+</body>
+</html>

@@ -130,10 +130,14 @@ def get_snowflake_query():
     if custom_query:
         return custom_query
 
-    table_name = os.getenv("SNOWFLAKE_KPI_TABLE", "DEPARTMENT_KPIS").strip()
+    # Lire FREQ_GLOBAL_PER_DEPT et mapper les colonnes
     return (
-        "SELECT department_name, frequentation, meteo, securite "
-        f"FROM {table_name}"
+        "SELECT DEPARTEMENT as department_name, "
+        "CAST(TOTAL_AURA as INTEGER) as frequentation, "
+        "75 as meteo, "
+        "80 as securite "
+        "FROM FREQ_GLOBAL_PER_DEPT "
+        "ORDER BY DEPARTEMENT"
     )
 
 
@@ -325,6 +329,96 @@ def snowflake_status():
             "last_error": last_snowflake_error,
         }
     )
+
+
+@app.route("/api/snowflake/test/freq-globale")
+def test_freq_globale():
+    """
+    Test de connexion Snowflake et lecture de la table FREQ_GLOBALE
+    """
+    if not is_snowflake_configured():
+        return jsonify({
+            "success": False,
+            "error": "Snowflake non configure. Verifiez les variables d'environnement.",
+            "required_env_vars": [
+                "SNOWFLAKE_ACCOUNT",
+                "SNOWFLAKE_USER",
+                "SNOWFLAKE_ROLE",
+                "SNOWFLAKE_WAREHOUSE",
+                "SNOWFLAKE_DATABASE",
+                "SNOWFLAKE_SCHEMA",
+                "SNOWFLAKE_PRIVATE_KEY_B64",
+            ]
+        }), 400
+
+    try:
+        print("[DEBUG] Tentative de connexion Snowflake...")
+        private_key = load_private_key_der_bytes()
+
+        connection = snowflake.connector.connect(
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            user=os.getenv("SNOWFLAKE_USER"),
+            role=os.getenv("SNOWFLAKE_ROLE"),
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            database=os.getenv("SNOWFLAKE_DATABASE"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA"),
+            private_key=private_key,
+            session_parameters={"QUERY_TAG": "aura_dashboard_test"},
+        )
+
+        print("[DEBUG] Connexion etablie avec succes!")
+
+        # Test 1: Lister les tables disponibles
+        print("[DEBUG] Recuperation des tables disponibles...")
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW TABLES;")
+            tables = cursor.fetchall()
+            table_names = [row[1] for row in tables]  # row[1] est le nom de la table
+
+        print(f"[DEBUG] Tables trouvees: {table_names}")
+
+        # Test 2: Interroger FREQ_GLOBALE
+        print("[DEBUG] Interrogation de FREQ_GLOBALE...")
+        with connection.cursor(DictCursor) as cursor:
+            cursor.execute("SELECT * FROM FREQ_GLOBALE LIMIT 100;")
+            rows = cursor.fetchall()
+
+        print(f"[DEBUG] {len(rows)} lignes recuperees de FREQ_GLOBALE")
+
+        # Convertir les resultats en format JSON-serializable
+        data = []
+        for row in rows:
+            data.append(dict(row))
+
+        connection.close()
+
+        return jsonify({
+            "success": True,
+            "message": f"Connexion Snowflake reussie! {len(rows)} lignes trouvees dans FREQ_GLOBALE",
+            "connection_details": {
+                "account": os.getenv("SNOWFLAKE_ACCOUNT"),
+                "user": os.getenv("SNOWFLAKE_USER"),
+                "database": os.getenv("SNOWFLAKE_DATABASE"),
+                "schema": os.getenv("SNOWFLAKE_SCHEMA"),
+            },
+            "available_tables": table_names,
+            "freq_globale_columns": list(data[0].keys()) if data else [],
+            "freq_globale_row_count": len(rows),
+            "freq_globale_sample": data[:10]  # Affiche les 10 premieres lignes
+        }), 200
+
+    except Exception as exc:
+        print(f"[DEBUG] Erreur Snowflake: {str(exc)}")
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "traceback": traceback.format_exc()
+        }), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True)

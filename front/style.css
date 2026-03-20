@@ -92,6 +92,25 @@ body.resizing {
     font-size: 14px;
 }
 
+.drawer-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #e8edf5;
+}
+
+.drawer-section:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.drawer-title {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+}
+
 .hidden {
     display: none;
 }
