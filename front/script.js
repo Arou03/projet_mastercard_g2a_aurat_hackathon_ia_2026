@@ -3,8 +3,39 @@
 // =========================
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
 const KPI_LABELS = {
-    frequentation: "Frequentation"
+    total_aura: "Total AURA",
+    rural: "Rural",
+    urbain: "Urbain",
+    stations_montagne: "Stations montagne",
+    villages_montagne: "Villages montagne"
 };
+
+// THEME MANAGEMENT
+function initThemeToggle() {
+    const themeToggle = document.getElementById("themeToggle");
+    if (!themeToggle) {
+        return;
+    }
+
+    const savedTheme = localStorage.getItem("appTheme") || "dark";
+    
+    // Apply saved theme on load
+    if (savedTheme === "light") {
+        document.body.classList.add("light-mode");
+        themeToggle.textContent = "☀️";
+    } else {
+        document.body.classList.remove("light-mode");
+        themeToggle.textContent = "🌙";
+    }
+    
+    // Toggle on click
+    themeToggle.addEventListener("click", () => {
+        document.body.classList.toggle("light-mode");
+        const isLight = document.body.classList.contains("light-mode");
+        localStorage.setItem("appTheme", isLight ? "light" : "dark");
+        themeToggle.textContent = isLight ? "☀️" : "🌙";
+    });
+}
 
 const AURA_COLORS = {
     bleuCiel: "#00a0df",
@@ -26,6 +57,7 @@ const vizContainer = document.getElementById("viz");
 const legendContainer = document.getElementById("legend");
 const dataToggle = document.getElementById("dataToggle");
 const dataDrawer = document.getElementById("dataDrawer");
+const weekFiltersContainer = document.getElementById("weekFilters");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -33,12 +65,14 @@ const layout = document.querySelector(".layout");
 const mapPanel = document.querySelector(".map-panel");
 const vizPanel = document.querySelector(".viz-panel");
 
-let activeKpi = "frequentation";
+let activeKpi = "total_aura";
 let geojsonLayer;
 let geoData;
 let scoreByDepartment = {};
 let frequentationByDepartment = {};
 let currentRange = { min: 0, max: 100 };
+let availableWeeks = [];
+let selectedWeeks = [];
 let stationsData = null;
 let stationsLayer = null;
 
@@ -67,6 +101,42 @@ function formatNumber(value) {
         return "N/A";
     }
     return new Intl.NumberFormat("fr-FR").format(value);
+}
+
+function weekSortKey(week) {
+    const text = String(week || "").toUpperCase();
+    if (text.startsWith("S") && /^\d+$/.test(text.slice(1))) {
+        return Number.parseInt(text.slice(1), 10);
+    }
+    return 999;
+}
+
+function renderWeekFilters() {
+    if (!weekFiltersContainer) {
+        return;
+    }
+
+    if (!availableWeeks.length) {
+        weekFiltersContainer.textContent = "Aucune semaine disponible";
+        return;
+    }
+
+    const selectedSet = new Set(selectedWeeks);
+    weekFiltersContainer.innerHTML = availableWeeks
+        .map(week => {
+            const checked = selectedSet.has(week) ? "checked" : "";
+            return `<label><input type="checkbox" class="week-filter" value="${week}" ${checked}> ${week}</label>`;
+        })
+        .join("");
+
+    const weekInputs = Array.from(document.querySelectorAll(".week-filter"));
+    weekInputs.forEach(input => {
+        input.addEventListener("change", () => {
+            selectedWeeks = weekInputs.filter(item => item.checked).map(item => item.value);
+            appendDebugLine("weeks filters", { selected: selectedWeeks });
+            fetchKpiData();
+        });
+    });
 }
 
 function appendDebugLine(message, details) {
@@ -181,7 +251,9 @@ function resetHighlight(e) {
 function onEachFeature(feature, layer) {
     const depName = feature.properties.nom;
     const value = scoreByDepartment[depName];
-    const frequentation = frequentationByDepartment[depName];
+    const totalAura = frequentationByDepartment[depName];
+    const metricLabel = activeKpi ? KPI_LABELS[activeKpi] : "Total AURA";
+    const metricValue = activeKpi ? value : totalAura;
 
     layer.on({
         mouseover: highlightFeature,
@@ -194,7 +266,7 @@ function onEachFeature(feature, layer) {
     layer.bindTooltip(
         `
             <strong>${depName}</strong><br>
-            Frequentation: ${formatNumber(frequentation)}
+            ${metricLabel}: ${formatNumber(metricValue)}
         `,
         {
             sticky: true,
@@ -355,7 +427,13 @@ function fetchKpiData() {
     }
 
     apiStatus.textContent = `Chargement du KPI ${KPI_LABELS[activeKpi]}...`;
-    fetch(`${API_URL}/api/data?kpi=${activeKpi}`)
+
+    const query = new URLSearchParams({ kpi: activeKpi });
+    if (selectedWeeks.length > 0) {
+        query.set("weeks", selectedWeeks.join(","));
+    }
+
+    fetch(`${API_URL}/api/data?${query.toString()}`)
         .then(res => {
             if (!res.ok) {
                 throw new Error("API non disponible");
@@ -363,6 +441,10 @@ function fetchKpiData() {
             return res.json();
         })
         .then(payload => {
+            availableWeeks = [...(payload.weeks_available || [])].sort((a, b) => weekSortKey(a) - weekSortKey(b));
+            selectedWeeks = payload.weeks_selected || selectedWeeks;
+            renderWeekFilters();
+
             updateScoreMapping(payload.departments);
             currentRange = payload.ranges;
             renderLegend();
@@ -370,6 +452,9 @@ function fetchKpiData() {
             renderGeoJson();
             renderStations();
             apiStatus.textContent = `Donnees synchronisees (${sourceLabel(payload.data_source)})`;
+            if (selectedWeeks.length > 0) {
+                apiStatus.textContent += ` - Semaines: ${selectedWeeks.join(", ")}`;
+            }
             if (payload.data_source === "mock" && payload.snowflake_error) {
                 apiStatus.textContent += ` - fallback: ${payload.snowflake_error}`;
             }
@@ -432,13 +517,13 @@ function initFilters() {
 
 Promise.all([
     fetch("data/departements.geojson").then(res => res.json()),
-    fetch("data/stations.geojson").then(res => res.json()),
-    fetch(`${API_URL}/api/hello`).then(res => res.json())
+    fetch("data/stations.geojson").then(res => res.json())
 ])
     .then(([geojson, stationsGeojson]) => {
         geoData = geojson;
         stationsData = stationsGeojson;
         stationsLayer = L.layerGroup().addTo(map);
+        initThemeToggle();
         initUiToggles();
         initPanelResize();
         checkSnowflakeStatus();

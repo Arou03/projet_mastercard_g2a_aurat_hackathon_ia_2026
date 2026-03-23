@@ -5,326 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Test Connexion Snowflake - AURA Dashboard</title>
     <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/luciole">
-    <style>
-        :root {
-            --aura-bleu-ciel: #00a0df;
-            --aura-bleu-marine: #162c4a;
-            --aura-bleu-web: #086cb2;
-            --aura-brique: #d14247;
-            --aura-sapin: #1a7251;
-            --aura-lila: #90437d;
-            --aura-bronze: #d4a434;
-            --aura-text: #eaf4ff;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: "Luciole", "Segoe UI", Arial, sans-serif;
-            background: linear-gradient(160deg, #0f233d 0%, #162c4a 45%, #1a3558 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            color: var(--aura-text);
-        }
-
-        .container {
-            width: 100%;
-            max-width: 1000px;
-            background: linear-gradient(180deg, #1a3558 0%, #142d4d 100%);
-            border: 2px solid #406182;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(4, 12, 24, 0.45);
-            overflow: hidden;
-            animation: panelReveal 380ms ease-out;
-        }
-
-        .header {
-            background: linear-gradient(120deg, var(--aura-bleu-ciel) 0%, var(--aura-bleu-web) 100%);
-            color: white;
-            padding: 36px 30px;
-            text-align: center;
-            border-bottom: 2px solid #7ec5e6;
-        }
-
-        .header h1 {
-            font-size: 28px;
-            margin-bottom: 10px;
-            letter-spacing: 0.2px;
-        }
-
-        .header p {
-            opacity: 0.96;
-            font-size: 14px;
-        }
-
-        .content {
-            padding: 30px;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 24px;
-            flex-wrap: wrap;
-        }
-
-        button {
-            padding: 11px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: transform 180ms ease, box-shadow 220ms ease, background 180ms ease;
-            border: 2px solid transparent;
-        }
-
-        .btn-primary {
-            background: linear-gradient(120deg, var(--aura-bleu-ciel) 0%, var(--aura-bleu-web) 100%);
-            color: #ffffff;
-            border-color: #87d4f7;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(0, 160, 223, 0.35);
-        }
-
-        .btn-primary:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .btn-secondary {
-            background: rgba(234, 244, 255, 0.94);
-            color: var(--aura-bleu-marine);
-            border-color: #7f9bb8;
-        }
-
-        .btn-secondary:hover {
-            transform: translateY(-2px);
-            background: #ddf1ff;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 700;
-            margin-bottom: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-        }
-
-        .status-loading {
-            background: var(--aura-bronze);
-            color: #162c4a;
-        }
-
-        .status-success {
-            background: var(--aura-sapin);
-            color: #ffffff;
-        }
-
-        .status-error {
-            background: var(--aura-brique);
-            color: #ffffff;
-        }
-
-        .result-section {
-            background: rgba(234, 244, 255, 0.08);
-            border-left: 4px solid var(--aura-bleu-ciel);
-            border: 1px solid #3f6285;
-            padding: 16px;
-            border-radius: 8px;
-            margin: 14px 0;
-            display: none;
-            animation: panelReveal 280ms ease-out;
-        }
-
-        .result-section.active {
-            display: block;
-        }
-
-        .result-section h3 {
-            color: var(--aura-bleu-ciel);
-            margin-bottom: 12px;
-            font-size: 16px;
-        }
-
-        .json-output {
-            background: #10253f;
-            color: #dff5ff;
-            border: 1px solid #3f6285;
-            padding: 16px;
-            border-radius: 8px;
-            overflow-x: auto;
-            font-family: "Consolas", "Courier New", monospace;
-            font-size: 12px;
-            line-height: 1.55;
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .json-key {
-            color: #ffd37a;
-        }
-
-        .json-string {
-            color: #8fd7ff;
-        }
-
-        .json-number {
-            color: #9ee8b3;
-        }
-
-        .json-boolean {
-            color: #ffb3ce;
-        }
-
-        .info-card {
-            background: rgba(0, 160, 223, 0.14);
-            border-left: 4px solid var(--aura-bleu-ciel);
-            padding: 14px;
-            border-radius: 6px;
-            margin: 12px 0;
-            font-size: 13px;
-            color: #e5f6ff;
-        }
-
-        .info-card strong {
-            color: #ffffff;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-            margin: 12px 0;
-            border: 1px solid #3f6285;
-            border-radius: 8px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-            color: #e6f4ff;
-        }
-
-        table thead {
-            background: #18385d;
-            font-weight: 700;
-        }
-
-        table th {
-            padding: 12px;
-            text-align: left;
-            color: #ffffff;
-            border-bottom: 2px solid var(--aura-bleu-ciel);
-        }
-
-        table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(127, 155, 184, 0.35);
-            background: rgba(234, 244, 255, 0.04);
-        }
-
-        table tr:hover td {
-            background: rgba(0, 160, 223, 0.12);
-        }
-
-        .error-message {
-            background: rgba(209, 66, 71, 0.18);
-            border-left: 4px solid var(--aura-brique);
-            color: #ffd7d9;
-            padding: 14px;
-            border-radius: 6px;
-            margin: 12px 0;
-            font-size: 13px;
-        }
-
-        .success-message {
-            background: rgba(26, 114, 81, 0.2);
-            border-left: 4px solid var(--aura-sapin);
-            color: #ddf6ea;
-            padding: 14px;
-            border-radius: 6px;
-            margin: 12px 0;
-            font-size: 13px;
-        }
-
-        .footer {
-            background: #10253f;
-            padding: 18px 30px;
-            text-align: center;
-            font-size: 12px;
-            color: #cfe3f5;
-            border-top: 2px solid #3f6285;
-        }
-
-        .back-link {
-            color: var(--aura-bleu-ciel);
-            text-decoration: none;
-            font-weight: 700;
-        }
-
-        .back-link:hover {
-            text-decoration: underline;
-        }
-
-        @keyframes panelReveal {
-            from {
-                opacity: 0;
-                transform: translateY(8px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @media (max-width: 600px) {
-            .container {
-                border-radius: 0;
-            }
-
-            .header {
-                padding: 28px 20px;
-            }
-
-            .header h1 {
-                font-size: 24px;
-            }
-
-            .content {
-                padding: 18px;
-            }
-
-            .button-group {
-                flex-direction: column;
-            }
-
-            button {
-                width: 100%;
-            }
-
-            .json-output {
-                font-size: 11px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="snowflake_test.css">
 </head>
 <body>
+    <button id="themeToggle" class="theme-toggle" type="button" title="Basculer le theme">🌙</button>
+
     <div class="container">
         <div class="header">
-            <h1>🚀 Test Connexion Snowflake</h1>
+            <h1>Test Connexion Snowflake</h1>
             <p>AURA Dashboard - Pipeline de Données</p>
         </div>
 
@@ -348,7 +36,7 @@
         </div>
 
         <div class="footer">
-            <p>💡 Cette page teste la connexion Snowflake et affiche les données brutes de FREQ_GLOBALE</p>
+            <p>Cette page teste la connexion Snowflake et affiche les données brutes de FREQ_GLOBAL_PER_DEPT</p>
             <p style="margin-top: 10px;">
                 <a href="index.html" class="back-link">← Retour au Dashboard</a>
             </p>
@@ -357,6 +45,30 @@
 
     <script>
         const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+        
+        function initThemeToggle() {
+            const themeToggle = document.getElementById("themeToggle");
+            if (!themeToggle) {
+                return;
+            }
+
+            const savedTheme = localStorage.getItem("appTheme") || "dark";
+            if (savedTheme === "light") {
+                document.body.classList.add("light-mode");
+                themeToggle.textContent = "☀️";
+            } else {
+                document.body.classList.remove("light-mode");
+                themeToggle.textContent = "🌙";
+            }
+
+            themeToggle.addEventListener("click", () => {
+                document.body.classList.toggle("light-mode");
+                const isLight = document.body.classList.contains("light-mode");
+                localStorage.setItem("appTheme", isLight ? "light" : "dark");
+                themeToggle.textContent = isLight ? "☀️" : "🌙";
+            });
+        }
+
         const resultsContainer = document.getElementById("resultsContainer");
         const statusBadge = document.getElementById("statusBadge");
         const testBtn = document.getElementById("testBtn");
@@ -415,23 +127,23 @@
         async function runTest() {
             testBtn.disabled = true;
             resultsContainer.innerHTML = '';
-            showStatus('⏳ Test en cours...', 'loading');
+            showStatus('Test en cours...', 'loading');
 
             try {
                 const response = await fetch(`${API_URL}/api/snowflake/test/freq-globale`);
                 const data = await response.json();
 
                 if (data.success) {
-                    showStatus('✅ Connexion Réussie', 'success');
+                    showStatus('Connexion réussie', 'success');
                     displaySuccessResults(data);
                 } else {
-                    showStatus('❌ Erreur de Connexion', 'error');
+                    showStatus('Erreur de connexion', 'error');
                     displayErrorResults(data);
                 }
             } catch (error) {
-                showStatus('❌ Erreur Réseau', 'error');
+                showStatus('Erreur réseau', 'error');
                 const errorSection = createResultSection(
-                    '⚠️ Erreur Réseau',
+                    'Erreur réseau',
                     `<div class="error-message">
                         <strong>Impossible de contacter l'API:</strong><br>
                         ${escapeHtml(error.message)}
@@ -449,7 +161,7 @@
             // Section 1: Détails de Connexion
             const connDetails = `
                 <div class="success-message">
-                    ✅ Connexion Snowflake établie avec succès!
+                    Connexion Snowflake établie avec succès.
                 </div>
                 <div class="info-card">
                     <strong>Compte:</strong> ${escapeHtml(data.connection_details.account)}<br>
@@ -459,20 +171,20 @@
                     <strong>Lignes Trouvées:</strong> ${data.freq_globale_row_count}
                 </div>
             `;
-            resultsContainer.appendChild(createResultSection('🔌 Détails de Connexion', connDetails));
+            resultsContainer.appendChild(createResultSection('Détails de Connexion', connDetails));
 
             // Section 2: Tables Disponibles
             if (data.available_tables && data.available_tables.length > 0) {
                 const tablesList = `<ul>${data.available_tables.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>`;
-                resultsContainer.appendChild(createResultSection('📋 Tables Disponibles', tablesList));
+                resultsContainer.appendChild(createResultSection('Tables Disponibles', tablesList));
             }
 
-            // Section 3: Structure de FREQ_GLOBALE
+            // Section 3: Structure de FREQ_GLOBAL_PER_DEPT
             if (data.freq_globale_columns && data.freq_globale_columns.length > 0) {
                 let columnsHtml = '<div class="info-card"><strong>Colonnes détectées:</strong><br>';
                 columnsHtml += data.freq_globale_columns.map(col => `• <code>${escapeHtml(col)}</code>`).join('<br>');
                 columnsHtml += '</div>';
-                resultsContainer.appendChild(createResultSection('🏗️ Structure FREQ_GLOBALE', columnsHtml));
+                resultsContainer.appendChild(createResultSection('Structure FREQ_GLOBAL_PER_DEPT', columnsHtml));
             }
 
             // Section 4: Données Échantillon (Tableau)
@@ -495,12 +207,12 @@
                 });
                 
                 tableHtml += '</tbody></table></div>';
-                resultsContainer.appendChild(createResultSection('📊 Données Échantillon', tableHtml));
+                resultsContainer.appendChild(createResultSection('Données Échantillon', tableHtml));
             }
 
             // Section 5: JSON Brut
             const jsonSection = createResultSection(
-                '📄 Réponse JSON Complète',
+                'Réponse JSON Complète',
                 `<div class="json-output"><pre>${formatJson(data)}</pre></div>`
             );
             resultsContainer.appendChild(jsonSection);
@@ -514,7 +226,7 @@
                     <strong>Type:</strong> ${escapeHtml(data.error_type || 'Unknown')}
                 </div>
                 <div class="info-card" style="background: #fff3e0; border-left-color: #ff9800; color: #e65100;">
-                    <strong>⚠️ Diagnostic:</strong><br>
+                    <strong>Diagnostic:</strong><br>
                     Vérifiez les variables d'environnement:<br>
                     • SNOWFLAKE_ACCOUNT<br>
                     • SNOWFLAKE_USER<br>
@@ -523,17 +235,17 @@
                     • SNOWFLAKE_SCHEMA
                 </div>
             `;
-            resultsContainer.appendChild(createResultSection('❌ Erreur', errorMessage));
+            resultsContainer.appendChild(createResultSection('Erreur', errorMessage));
 
             // Afficher le traceback s'il existe
             if (data.traceback) {
                 const tracebackHtml = `<div class="json-output"><pre>${escapeHtml(data.traceback)}</pre></div>`;
-                resultsContainer.appendChild(createResultSection('🔍 Traceback Complet', tracebackHtml));
+                resultsContainer.appendChild(createResultSection('Traceback Complet', tracebackHtml));
             }
 
             // JSON brut pour debug
             const jsonSection = createResultSection(
-                '📄 Réponse JSON Complète',
+                'Réponse JSON Complète',
                 `<div class="json-output"><pre>${formatJson(data)}</pre></div>`
             );
             resultsContainer.appendChild(jsonSection);
@@ -550,6 +262,7 @@
 
         // Lancer le test automatiquement au chargement
         window.addEventListener('load', () => {
+            initThemeToggle();
             // Facultatif: décommenter pour test automatique
             // runTest();
         });

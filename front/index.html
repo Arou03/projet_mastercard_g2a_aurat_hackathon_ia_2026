@@ -12,6 +12,9 @@
 
 <body>
 
+<!-- Theme toggle button -->
+<button id="themeToggle" class="theme-toggle" type="button" title="Basculer le thème">🌙</button>
+
 <div class="layout">
 
     <!-- CARTE -->
@@ -25,7 +28,16 @@
                 <div class="drawer-section">
                     <p class="drawer-title">Zones (1 choix max)</p>
                     <label><input type="radio" name="areaFill" class="area-filter" value="none"> Aucun remplissage</label>
-                    <label><input type="radio" name="areaFill" class="area-filter" value="frequentation" checked> Frequentation</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="total_aura" checked> Total AURA</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="rural"> Rural</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="urbain"> Urbain</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="stations_montagne"> Stations montagne</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="villages_montagne"> Villages montagne</label>
+                </div>
+
+                <div class="drawer-section">
+                    <p class="drawer-title">Semaines (multi-selection)</p>
+                    <div id="weekFilters" class="week-filters">Chargement...</div>
                 </div>
 
                 <div class="drawer-section">
