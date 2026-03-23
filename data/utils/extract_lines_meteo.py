@@ -2,8 +2,10 @@ import csv
 import os
 import glob
 
-input_dir = './input'
-output_dir = './output'
+YEAR_FILTER = ('2020', '2021', '2022', '2023', '2024')
+
+input_dir = './wrk/input/meteo_france'
+output_dir = './wrk/tmp/meteo_france'
 
 os.makedirs(input_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
@@ -23,10 +25,11 @@ else:
         print(f"Processing: {filename}...")
         
         with open(input_path, mode='r', encoding='utf-8') as infile, \
-            open(output_path, mode='w', encoding='utf-8', newline='') as outfile:
+             open(output_path, mode='w', encoding='utf-8', newline='') as outfile:
             
             reader = csv.reader(infile, delimiter=';')
             writer = csv.writer(outfile, delimiter=';')
+            
             try:
                 header = next(reader)
             except StopIteration:
@@ -34,16 +37,20 @@ else:
                 continue
                 
             writer.writerow(header)
+            
             try:
                 date_idx = header.index('AAAAMMJJ')
             except ValueError:
                 print(f"  -> Skipping {filename}: 'AAAAMMJJ' column not found.")
                 continue
+                
             extracted_count = 0
             for row in reader:
                 if len(row) > date_idx:
                     date_str = row[date_idx]
-                    if date_str.startswith('2023') or date_str.startswith('2024'):
+                    
+                    # On passe directement la constante (qui est déjà un tuple)
+                    if date_str.startswith(YEAR_FILTER):
                         writer.writerow(row)
                         extracted_count += 1
                         
