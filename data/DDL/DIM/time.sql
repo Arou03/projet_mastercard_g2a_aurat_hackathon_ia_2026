@@ -1,14 +1,14 @@
-create or replace dynamic table M2_ISD_EQUIPE_5_DB.DIMENSION.TIME(
+create or replace dynamic table M2_ISD_EQUIPE_5_DB.DIMENSION.DIM_TIME(
 	DATE_TS,
 	SATURDAY_TS,
-	ANNEE,
-	MOIS,
-	JOUR,
-	JOUR_SEMAINE,
+	YEAR,
+	MONTH,
+	DAY,
+	DAY_OF_THE_WEEK,
 	ISO_WEEK,
 	ISO_YEAR,
-	NOM_JOUR,
-	SEMAINE,
+	DAY_NAME,
+	WEEK,
 	SAISON
 ) target_lag = '1 day' refresh_mode = AUTO initialize = ON_CREATE warehouse = HACKATHON_WH
  as
@@ -16,14 +16,14 @@ SELECT
     TRY_TO_TIMESTAMP(DATE::VARCHAR) AS date_ts,
     TRY_TO_TIMESTAMP(SATURDAY::VARCHAR) AS saturday_ts,
     
-    ANNEE AS annee,
-    MOIS AS mois,
-    JOUR AS jour,
-    JOUR_SEMAINE AS jour_semaine,
+    ANNEE AS YEAR,
+    MOIS AS MONTH,
+    JOUR AS DAY,
+    JOUR_SEMAINE AS DAY_OF_THE_WEEK,
     ISO_WEEK AS iso_week,
     ISO_YEAR AS iso_year,
-    NOM_JOUR AS nom_jour,
-    SEMAINE AS semaine,
+    NOM_JOUR AS DAY_NAME,
+    SEMAINE AS WEEK,
     SAISON AS saison
 
 FROM RAW.DIM_TEMPS;

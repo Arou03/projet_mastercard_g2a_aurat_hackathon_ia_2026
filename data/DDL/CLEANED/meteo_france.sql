@@ -1,4 +1,4 @@
-create or replace dynamic table M2_ISD_EQUIPE_5_DB.CLEANED.METEO_FRANCE(
+create or replace dynamic table M2_ISD_EQUIPE_5_DB.CLEANED.WEATHER_FRANCE(
 	DEPARTEMENT_CODE,
 	DATE,
 	PRECIPITATIONS_MM_MOY,
