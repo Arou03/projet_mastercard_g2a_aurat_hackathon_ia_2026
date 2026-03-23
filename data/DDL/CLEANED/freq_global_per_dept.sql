@@ -1,8 +1,15 @@
-CREATE OR REPLACE DYNAMIC TABLE CLEANED.freq_global_per_dept
-    TARGET_LAG = '4 hour'
-    WAREHOUSE = 'HACKATHON_WH'
-    COMMENT = 'Table croisant la fréquentation H24 et la distribution par département'
-AS
+create or replace dynamic table M2_ISD_EQUIPE_5_DB.CLEANED.FREQ_GLOBAL_PER_DEPT(
+	CODE_DEPARTEMENT,
+	SAISON,
+	WEEK,
+	RURAL,
+	URBAIN,
+	TOTAL_AURA,
+	STATIONS_MONTAGNE,
+	VILLAGES_MONTAGNE
+) target_lag = '4 hours' refresh_mode = AUTO initialize = ON_CREATE warehouse = HACKATHON_WH
+ COMMENT='Table croisant la fréquentation H24 et la distribution par département'
+ as
 SELECT 
     r.CODE_DEPARTEMENT,
     'H24' AS SAISON,
