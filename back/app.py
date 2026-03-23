@@ -15,18 +15,18 @@ CORS(app)  # Autorise les requêtes du front
 # Donnees de demo pour hackathon.
 # Ces valeurs pourront ensuite venir de Snowflake.
 DEPARTMENT_KPIS = {
-    "Ain": {"frequentation": 72, "meteo": 68, "securite": 81},
-    "Allier": {"frequentation": 54, "meteo": 64, "securite": 84},
-    "Ardeche": {"frequentation": 66, "meteo": 74, "securite": 79},
-    "Cantal": {"frequentation": 58, "meteo": 70, "securite": 88},
-    "Drome": {"frequentation": 61, "meteo": 72, "securite": 80},
-    "Haute-Loire": {"frequentation": 57, "meteo": 67, "securite": 86},
-    "Haute-Savoie": {"frequentation": 95, "meteo": 83, "securite": 77},
-    "Isere": {"frequentation": 88, "meteo": 79, "securite": 76},
-    "Loire": {"frequentation": 62, "meteo": 63, "securite": 82},
-    "Puy-de-Dome": {"frequentation": 69, "meteo": 66, "securite": 83},
-    "Rhone": {"frequentation": 91, "meteo": 62, "securite": 71},
-    "Savoie": {"frequentation": 92, "meteo": 81, "securite": 78},
+    "Ain": {"frequentation": 72},
+    "Allier": {"frequentation": 54},
+    "Ardeche": {"frequentation": 66},
+    "Cantal": {"frequentation": 58},
+    "Drome": {"frequentation": 61},
+    "Haute-Loire": {"frequentation": 57},
+    "Haute-Savoie": {"frequentation": 95},
+    "Isere": {"frequentation": 88},
+    "Loire": {"frequentation": 62},
+    "Puy-de-Dome": {"frequentation": 69},
+    "Rhone": {"frequentation": 91},
+    "Savoie": {"frequentation": 92},
 }
 
 ALIASES = {
@@ -37,7 +37,7 @@ ALIASES = {
     "Rhone": "Rhône",
 }
 
-VALID_KPIS = {"frequentation", "meteo", "securite"}
+VALID_KPIS = {"frequentation"}
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 
 # Cache en memoire process-local.
@@ -133,9 +133,7 @@ def get_snowflake_query():
     # Lire FREQ_GLOBAL_PER_DEPT et mapper les colonnes
     return (
         "SELECT DEPARTEMENT as department_name, "
-        "CAST(TOTAL_AURA as INTEGER) as frequentation, "
-        "75 as meteo, "
-        "80 as securite "
+        "CAST(TOTAL_AURA as INTEGER) as frequentation "
         "FROM FREQ_GLOBAL_PER_DEPT "
         "ORDER BY DEPARTEMENT"
     )
@@ -172,8 +170,6 @@ def fetch_dataset_from_snowflake():
 
         dataset[canonical_name] = {
             "frequentation": to_int(read_ci(row, "frequentation")),
-            "meteo": to_int(read_ci(row, "meteo")),
-            "securite": to_int(read_ci(row, "securite")),
         }
 
     return dataset
@@ -186,8 +182,6 @@ def build_departments_payload(selected_kpi, dataset):
             {
                 "name": to_display_name(canonical_name),
                 "frequentation": values["frequentation"],
-                "meteo": values["meteo"],
-                "securite": values["securite"],
                 "score": values[selected_kpi],
             }
         )
@@ -304,8 +298,7 @@ def department_data(dep_name):
             "kpis": values,
             "insights": [
                 "Pic de frequentation pendant la saison hivernale.",
-                "Meteo stable sur les 7 derniers jours.",
-                "Niveau de securite conforme au seuil regional.",
+                "Niveau global de frequentation observe sur la periode selectionnee.",
             ],
         }
         set_cache(cache_key, payload)

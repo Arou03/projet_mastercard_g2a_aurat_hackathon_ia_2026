@@ -5,9 +5,14 @@ const dep = params.get("dep");
 
 const title = document.getElementById("title");
 const frequentationValue = document.getElementById("frequentationValue");
-const meteoValue = document.getElementById("meteoValue");
-const securiteValue = document.getElementById("securiteValue");
 const insightsList = document.getElementById("insightsList");
+
+function formatNumber(value) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "-";
+    }
+    return new Intl.NumberFormat("fr-FR").format(value);
+}
 
 function renderError(message) {
     title.textContent = "Erreur";
@@ -28,9 +33,7 @@ if (!dep) {
         })
         .then(payload => {
             title.textContent = `Departement : ${payload.name}`;
-            frequentationValue.textContent = payload.kpis.frequentation;
-            meteoValue.textContent = payload.kpis.meteo;
-            securiteValue.textContent = payload.kpis.securite;
+            frequentationValue.textContent = formatNumber(payload.kpis.frequentation);
             insightsList.innerHTML = payload.insights.map(item => `<li>${item}</li>`).join("");
         })
         .catch(() => {

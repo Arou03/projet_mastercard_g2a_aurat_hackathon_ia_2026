@@ -3,9 +3,20 @@
 // =========================
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
 const KPI_LABELS = {
-    frequentation: "Frequentation",
-    meteo: "Meteo",
-    securite: "Securite"
+    frequentation: "Frequentation"
+};
+
+const AURA_COLORS = {
+    bleuCiel: "#00a0df",
+    bleuMarine: "#162c4a",
+    bleuWeb: "#086cb2",
+    brique: "#d14247",
+    sapin: "#1a7251",
+    lila: "#90437d",
+    bronze: "#d4a434",
+    grad1: "#d9f1fb",
+    grad2: "#9fdcf2",
+    grad3: "#66c7ea",
 };
 
 const areaFilters = Array.from(document.querySelectorAll(".area-filter"));
@@ -26,15 +37,15 @@ let activeKpi = "frequentation";
 let geojsonLayer;
 let geoData;
 let scoreByDepartment = {};
-let kpisByDepartment = {};
+let frequentationByDepartment = {};
 let currentRange = { min: 0, max: 100 };
 let stationsData = null;
 let stationsLayer = null;
 
 const STATION_TYPE_STYLES = {
-    "Ski Alpin": { color: "#f97316" },
-    "Ski Nordique": { color: "#0ea5e9" },
-    "Ski Alpin et Ski Nordique": { color: "#10b981" }
+    "Ski Alpin": { color: AURA_COLORS.brique },
+    "Ski Nordique": { color: AURA_COLORS.sapin },
+    "Ski Alpin et Ski Nordique": { color: AURA_COLORS.bronze }
 };
 
 if (window.proj4) {
@@ -49,6 +60,13 @@ function sourceLabel(source) {
     if (source === "cache") return "Cache backend";
     if (source === "mock") return "Donnees mock";
     return "Inconnue";
+}
+
+function formatNumber(value) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "N/A";
+    }
+    return new Intl.NumberFormat("fr-FR").format(value);
 }
 
 function appendDebugLine(message, details) {
@@ -135,14 +153,14 @@ function getColor(value, min, max) {
         return "#d9d9d9";
     }
     if (max === min) {
-        return "#225ea8";
+        return AURA_COLORS.bleuWeb;
     }
     const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
-    if (ratio < 0.2) return "#eff3ff";
-    if (ratio < 0.4) return "#bdd7e7";
-    if (ratio < 0.6) return "#6baed6";
-    if (ratio < 0.8) return "#3182bd";
-    return "#08519c";
+    if (ratio < 0.2) return AURA_COLORS.grad1;
+    if (ratio < 0.4) return AURA_COLORS.grad2;
+    if (ratio < 0.6) return AURA_COLORS.grad3;
+    if (ratio < 0.8) return AURA_COLORS.bleuCiel;
+    return AURA_COLORS.bleuWeb;
 }
 
 // Hover interaction
@@ -163,7 +181,7 @@ function resetHighlight(e) {
 function onEachFeature(feature, layer) {
     const depName = feature.properties.nom;
     const value = scoreByDepartment[depName];
-    const kpis = kpisByDepartment[depName];
+    const frequentation = frequentationByDepartment[depName];
 
     layer.on({
         mouseover: highlightFeature,
@@ -176,9 +194,7 @@ function onEachFeature(feature, layer) {
     layer.bindTooltip(
         `
             <strong>${depName}</strong><br>
-            Frequentation: ${kpis?.frequentation ?? "N/A"}<br>
-            Meteo: ${kpis?.meteo ?? "N/A"}<br>
-            Securite: ${kpis?.securite ?? "N/A"}
+            Frequentation: ${formatNumber(frequentation)}
         `,
         {
             sticky: true,
@@ -188,7 +204,7 @@ function onEachFeature(feature, layer) {
     );
 
     if (activeKpi) {
-        layer.bindPopup(`${depName}<br>${KPI_LABELS[activeKpi]}: ${value ?? "N/A"}`);
+        layer.bindPopup(`${depName}<br>${KPI_LABELS[activeKpi]}: ${formatNumber(value)}`);
     } else {
         layer.bindPopup(depName);
     }
@@ -209,7 +225,7 @@ function renderLegend() {
             <span class="scale-box c4"></span>
             <span class="scale-box c5"></span>
         </div>
-        <div class="legend-range">${currentRange.min} - ${currentRange.max}</div>
+        <div class="legend-range">${formatNumber(currentRange.min)} - ${formatNumber(currentRange.max)}</div>
     `;
 }
 
@@ -223,9 +239,11 @@ function renderSummary(departments, ranges) {
         .sort((a, b) => b.score - a.score)
         .slice(0, 5);
 
+    const maxScore = Math.max(...topDepartments.map(item => item.score), 0);
+
     vizContainer.innerHTML = `
         <p><strong>KPI actif:</strong> ${KPI_LABELS[activeKpi]}</p>
-        <p><strong>Moyenne regionale:</strong> ${ranges.avg}</p>
+        <p><strong>Moyenne regionale:</strong> ${formatNumber(ranges.avg)}</p>
         <div class="bars">
             ${topDepartments
                 .map(
@@ -233,9 +251,9 @@ function renderSummary(departments, ranges) {
                         <div class="bar-row">
                             <span>${item.name}</span>
                             <div class="bar-track">
-                                <div class="bar-fill" style="width:${item.score}%;"></div>
+                                <div class="bar-fill" style="width:${maxScore > 0 ? (item.score / maxScore) * 100 : 0}%;"></div>
                             </div>
-                            <strong>${item.score}</strong>
+                            <strong>${formatNumber(item.score)}</strong>
                         </div>
                     `
                 )
@@ -246,14 +264,10 @@ function renderSummary(departments, ranges) {
 
 function updateScoreMapping(departments) {
     scoreByDepartment = {};
-    kpisByDepartment = {};
+    frequentationByDepartment = {};
     departments.forEach(dep => {
         scoreByDepartment[dep.name] = dep.score;
-        kpisByDepartment[dep.name] = {
-            frequentation: dep.frequentation,
-            meteo: dep.meteo,
-            securite: dep.securite
-        };
+        frequentationByDepartment[dep.name] = dep.frequentation;
     });
 }
 
@@ -315,7 +329,7 @@ function renderStations() {
         const styleConfig = STATION_TYPE_STYLES[stationType] || STATION_TYPE_STYLES["Ski Alpin"];
         L.circleMarker(latLng, {
             radius: 5,
-            color: "#0f172a",
+            color: AURA_COLORS.bleuMarine,
             weight: 1,
             fillColor: styleConfig.color,
             fillOpacity: 0.9,
