@@ -1,4 +1,34 @@
-@import url("https://fonts.cdnfonts.com/css/luciole");
+@font-face {
+    font-family: "Luciole";
+    src: local("Luciole Regular"), url("assets/fonts/Luciole/Luciole-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Luciole";
+    src: local("Luciole Bold"), url("assets/fonts/Luciole/Luciole-Bold.ttf") format("truetype");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Luciole";
+    src: local("Luciole Regular Italic"), url("assets/fonts/Luciole/Luciole-Regular-Italic.ttf") format("truetype");
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Luciole";
+    src: local("Luciole Bold Italic"), url("assets/fonts/Luciole/Luciole-Bold-Italic.ttf") format("truetype");
+    font-weight: 700;
+    font-style: italic;
+    font-display: swap;
+}
 
 :root {
     --aura-bleu-ciel: #00a0df;
