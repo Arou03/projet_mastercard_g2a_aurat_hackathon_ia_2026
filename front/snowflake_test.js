@@ -1,4 +1,5 @@
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const FETCH_TIMEOUT_MS = 15000;
 
 const resultsContainer = document.getElementById("resultsContainer");
 const statusBadge = document.getElementById("statusBadge");
@@ -80,13 +81,23 @@ function formatJson(obj, indent = 0) {
     return String(obj);
 }
 
+async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 async function runTest() {
     testBtn.disabled = true;
     resultsContainer.innerHTML = "";
     showStatus("Test en cours...", "loading");
 
     try {
-        const response = await fetch(`${API_URL}/api/snowflake/test/freq-globale`);
+        const response = await fetchWithTimeout(`${API_URL}/api/snowflake/test/freq-globale`);
         const data = await response.json();
 
         if (data.success) {
@@ -97,20 +108,21 @@ async function runTest() {
             displayErrorResults(data);
         }
     } catch (error) {
-        showStatus("Erreur reseau", "error");
+        const isTimeout = error && error.name === "AbortError";
+        showStatus(isTimeout ? "Timeout API" : "Erreur reseau", "error");
         const errorSection = createResultSection(
             "Erreur reseau",
             `<div class="error-message">
                 <strong>Impossible de contacter l'API:</strong><br>
-                ${escapeHtml(error.message)}
+                ${escapeHtml(isTimeout ? "Le serveur a mis trop de temps a repondre." : error.message)}
                 <br><br>
                 <em>Assurez-vous que le backend Render est en cours d'execution et que l'URL est correcte.</em>
             </div>`
         );
         resultsContainer.appendChild(errorSection);
+    } finally {
+        testBtn.disabled = false;
     }
-
-    testBtn.disabled = false;
 }
 
 function displaySuccessResults(data) {

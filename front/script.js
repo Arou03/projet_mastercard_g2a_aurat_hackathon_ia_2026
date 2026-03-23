@@ -2,6 +2,7 @@
 // API CONFIG
 // =========================
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const FETCH_TIMEOUT_MS = 15000;
 const KPI_LABELS = {
     total_aura: "Total AURA",
     rural: "Rural",
@@ -51,13 +52,13 @@ const AURA_COLORS = {
 };
 
 const areaFilters = Array.from(document.querySelectorAll(".area-filter"));
-const pointFilters = Array.from(document.querySelectorAll(".point-filter"));
 const apiStatus = document.getElementById("apiStatus");
 const vizContainer = document.getElementById("viz");
 const legendContainer = document.getElementById("legend");
 const dataToggle = document.getElementById("dataToggle");
 const dataDrawer = document.getElementById("dataDrawer");
 const weekFiltersContainer = document.getElementById("weekFilters");
+const stationActivityFiltersContainer = document.getElementById("stationActivityFilters");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -73,21 +74,10 @@ let frequentationByDepartment = {};
 let currentRange = { min: 0, max: 100 };
 let availableWeeks = [];
 let selectedWeeks = [];
-let stationsData = null;
+let stationPoints = [];
+let availableStationActivities = [];
+let selectedStationActivities = [];
 let stationsLayer = null;
-
-const STATION_TYPE_STYLES = {
-    "Ski Alpin": { color: AURA_COLORS.brique },
-    "Ski Nordique": { color: AURA_COLORS.sapin },
-    "Ski Alpin et Ski Nordique": { color: AURA_COLORS.bronze }
-};
-
-if (window.proj4) {
-    proj4.defs(
-        "EPSG:2154",
-        "+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs"
-    );
-}
 
 function sourceLabel(source) {
     if (source === "snowflake") return "Snowflake";
@@ -101,6 +91,16 @@ function formatNumber(value) {
         return "N/A";
     }
     return new Intl.NumberFormat("fr-FR").format(value);
+}
+
+async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
 }
 
 function weekSortKey(week) {
@@ -356,58 +356,133 @@ function renderGeoJson() {
     }).addTo(map);
 }
 
-function normalizeStationType(rawType) {
-    const value = (rawType || "").toLowerCase();
-    if (value.includes("alpin") && value.includes("nordique")) {
-        return "Ski Alpin et Ski Nordique";
+function colorForActivity(activity) {
+    const palette = [
+        AURA_COLORS.brique,
+        AURA_COLORS.sapin,
+        AURA_COLORS.bronze,
+        AURA_COLORS.lila,
+        AURA_COLORS.bleuCiel,
+    ];
+    const value = String(activity || "").toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < value.length; i += 1) {
+        hash = ((hash << 5) - hash) + value.charCodeAt(i);
+        hash |= 0;
     }
-    if (value.includes("nordique")) {
-        return "Ski Nordique";
-    }
-    return "Ski Alpin";
+    const index = Math.abs(hash) % palette.length;
+    return palette[index];
 }
 
-function toLatLngFromLambert93(coordinates) {
-    if (!window.proj4 || !Array.isArray(coordinates) || coordinates.length < 2) {
-        return null;
+function renderStationActivityFilters() {
+    if (!stationActivityFiltersContainer) {
+        return;
     }
-    const [lon, lat] = proj4("EPSG:2154", "EPSG:4326", coordinates);
-    return [lat, lon];
+
+    if (!availableStationActivities.length) {
+        stationActivityFiltersContainer.textContent = "Aucune activite disponible";
+        return;
+    }
+
+    const selectedSet = new Set(selectedStationActivities);
+    stationActivityFiltersContainer.innerHTML = availableStationActivities
+        .map(activity => {
+            const checked = selectedSet.has(activity) ? "checked" : "";
+            return `<label><input type="checkbox" class="point-filter" value="${activity}" ${checked}> ${activity}</label>`;
+        })
+        .join("");
+
+    const pointFilters = Array.from(document.querySelectorAll(".point-filter"));
+    pointFilters.forEach(input => {
+        input.addEventListener("change", () => {
+            selectedStationActivities = pointFilters.filter(item => item.checked).map(item => item.value);
+            renderStations();
+            appendDebugLine("points filters", { selected: selectedStationActivities });
+        });
+    });
+}
+
+function fetchStations() {
+    const query = new URLSearchParams();
+    if (selectedStationActivities.length > 0) {
+        query.set("activities", selectedStationActivities.join(","));
+    }
+
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    apiStatus.textContent = "Chargement des points d'intérêt...";
+    
+    return fetchWithTimeout(`${API_URL}/api/stations${suffix}`)
+        .then(res => {
+            if (!res.ok) {
+                throw new Error(`API stations failed: ${res.status}`);
+            }
+            return res.json();
+        })
+        .then(payload => {
+            stationPoints = payload.points || [];
+            availableStationActivities = payload.activities_available || [];
+            
+            // Si aucune activité sélectionnée, sélectionner toutes les disponibles
+            if (selectedStationActivities.length === 0 && availableStationActivities.length > 0) {
+                selectedStationActivities = [...availableStationActivities];
+            }
+            
+            renderStationActivityFilters();
+            renderStations();
+            
+            appendDebugLine("/api/stations", {
+                source: payload.data_source,
+                count: stationPoints.length,
+                activities_available: availableStationActivities.length,
+                activities_selected: selectedStationActivities.length,
+            });
+            
+            apiStatus.textContent = `Points d'intérêt chargés (${stationPoints.length} points, ${availableStationActivities.length} activités)`;
+        })
+        .catch(error => {
+            stationPoints = [];
+            availableStationActivities = [];
+            selectedStationActivities = [];
+            renderStationActivityFilters();
+            renderStations();
+            appendDebugLine("/api/stations error", { message: error?.message || "unknown" });
+            apiStatus.textContent = "Erreur chargement points d'intérêt";
+        });
 }
 
 function renderStations() {
-    if (!stationsData || !stationsLayer) {
+    if (!stationsLayer) {
         return;
     }
 
-    const selectedTypes = pointFilters.filter(item => item.checked).map(item => item.value);
+    const selectedActivitiesSet = new Set(selectedStationActivities);
     stationsLayer.clearLayers();
 
-    if (selectedTypes.length === 0) {
+    if (selectedActivitiesSet.size === 0) {
         return;
     }
 
-    stationsData.features.forEach(feature => {
-        const stationType = normalizeStationType(feature.properties.TYPE);
-        if (!selectedTypes.includes(stationType)) {
+    stationPoints.forEach(point => {
+        const pointActivities = Array.isArray(point.activities) ? point.activities : [];
+        const match = pointActivities.some(activity => selectedActivitiesSet.has(activity));
+        if (!match) {
             return;
         }
 
-        const latLng = toLatLngFromLambert93(feature.geometry.coordinates);
-        if (!latLng) {
+        if (typeof point.lat !== "number" || typeof point.lon !== "number") {
             return;
         }
 
-        const styleConfig = STATION_TYPE_STYLES[stationType] || STATION_TYPE_STYLES["Ski Alpin"];
-        L.circleMarker(latLng, {
+        const firstActivity = pointActivities[0] || "Activite non renseignee";
+        L.circleMarker([point.lat, point.lon], {
             radius: 5,
             color: AURA_COLORS.bleuMarine,
             weight: 1,
-            fillColor: styleConfig.color,
+            fillColor: colorForActivity(firstActivity),
             fillOpacity: 0.9,
         })
             .bindPopup(
-                `<strong>${feature.properties.NOMSTATION}</strong><br>${stationType}<br>${feature.properties.REMARQUES || ""}`
+                `<strong>${point.name || "Installation sans nom"}</strong><br>${point.equipment_type || "Type inconnu"}<br>${point.department_name || ""}<br>${pointActivities.join(", ") || "Aucune activite"}`
             )
             .addTo(stationsLayer);
     });
@@ -433,7 +508,7 @@ function fetchKpiData() {
         query.set("weeks", selectedWeeks.join(","));
     }
 
-    fetch(`${API_URL}/api/data?${query.toString()}`)
+    fetchWithTimeout(`${API_URL}/api/data?${query.toString()}`)
         .then(res => {
             if (!res.ok) {
                 throw new Error("API non disponible");
@@ -466,15 +541,19 @@ function fetchKpiData() {
             }
             checkSnowflakeStatus();
         })
-        .catch(() => {
-            apiStatus.textContent = "Erreur de chargement API";
+        .catch(error => {
+            if (error && error.name === "AbortError") {
+                apiStatus.textContent = "Timeout API: reponse trop lente";
+            } else {
+                apiStatus.textContent = "Erreur de chargement API";
+            }
             vizContainer.innerHTML = "Impossible de recuperer les donnees KPI.";
-            appendDebugLine("/api/data error");
+            appendDebugLine("/api/data error", { message: error?.message || "unknown" });
         });
 }
 
 function checkSnowflakeStatus() {
-    fetch(`${API_URL}/api/snowflake/status`)
+    fetchWithTimeout(`${API_URL}/api/snowflake/status`, 8000)
         .then(res => {
             if (!res.ok) {
                 throw new Error("Status endpoint unavailable");
@@ -482,11 +561,6 @@ function checkSnowflakeStatus() {
             return res.json();
         })
         .then(status => {
-            if (status.configured) {
-                apiStatus.textContent = "Backend configure pour Snowflake (verification des donnees en cours...)";
-            } else {
-                apiStatus.textContent = "Snowflake non configure: fallback mock actif";
-            }
             console.log("[API /api/snowflake/status]", status);
             appendDebugLine("/api/snowflake/status", status);
         })
@@ -504,24 +578,12 @@ function initFilters() {
             fetchKpiData();
         });
     });
-
-    pointFilters.forEach(input => {
-        input.addEventListener("change", () => {
-            renderStations();
-            appendDebugLine("points filters", {
-                selected: pointFilters.filter(item => item.checked).map(item => item.value)
-            });
-        });
-    });
 }
 
-Promise.all([
-    fetch("data/departements.geojson").then(res => res.json()),
-    fetch("data/stations.geojson").then(res => res.json())
-])
-    .then(([geojson, stationsGeojson]) => {
+fetch("data/departements.geojson")
+    .then(res => res.json())
+    .then(geojson => {
         geoData = geojson;
-        stationsData = stationsGeojson;
         stationsLayer = L.layerGroup().addTo(map);
         initThemeToggle();
         initUiToggles();
@@ -529,6 +591,7 @@ Promise.all([
         checkSnowflakeStatus();
         initFilters();
         fetchKpiData();
+        fetchStations();
     })
     .catch(() => {
         apiStatus.textContent = "Backend indisponible";

@@ -40,11 +40,43 @@ ALIASES = {
 
 VALID_KPIS = {"total_aura", "rural", "urbain", "stations_montagne", "villages_montagne"}
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))
+SNOWFLAKE_LOGIN_TIMEOUT_SECONDS = int(os.getenv("SNOWFLAKE_LOGIN_TIMEOUT_SECONDS", "10"))
+SNOWFLAKE_NETWORK_TIMEOUT_SECONDS = int(os.getenv("SNOWFLAKE_NETWORK_TIMEOUT_SECONDS", "20"))
+SNOWFLAKE_SOCKET_TIMEOUT_SECONDS = int(os.getenv("SNOWFLAKE_SOCKET_TIMEOUT_SECONDS", "20"))
+SNOWFLAKE_QUERY_TIMEOUT_SECONDS = int(os.getenv("SNOWFLAKE_QUERY_TIMEOUT_SECONDS", "20"))
+
+# Schémas globaux (recommandés)
+# - SNOWFLAKE_SCHEMA_PUBLIC: schéma par défaut (PUBLIC)
+# - SNOWFLAKE_SCHEMA_FACT: schéma des tables de faits (ex: CLEANED)
+# - SNOWFLAKE_SCHEMA_DIM: schéma des dimensions (ex: DIMENSION)
+# - SNOWFLAKE_SCHEMA_REF: schéma des référentiels (ex: REF)
+# Compat rétroactive conservée avec SNOWFLAKE_FACT_SCHEMA / SNOWFLAKE_DIM_SCHEMA.
+SNOWFLAKE_SCHEMA_PUBLIC = os.getenv("SNOWFLAKE_SCHEMA_PUBLIC", os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC")).strip() or "PUBLIC"
+SNOWFLAKE_SCHEMA_FACT = os.getenv("SNOWFLAKE_SCHEMA_FACT", os.getenv("SNOWFLAKE_FACT_SCHEMA", "CLEANED")).strip() or "CLEANED"
+SNOWFLAKE_SCHEMA_DIM = os.getenv("SNOWFLAKE_SCHEMA_DIM", os.getenv("SNOWFLAKE_DIM_SCHEMA", "DIMENSION")).strip() or "DIMENSION"
+SNOWFLAKE_SCHEMA_REF = os.getenv("SNOWFLAKE_SCHEMA_REF", "REF").strip() or "REF"
+
+# Alias utilises dans le code existant
+SNOWFLAKE_FACT_SCHEMA = SNOWFLAKE_SCHEMA_FACT
+SNOWFLAKE_DIM_SCHEMA = SNOWFLAKE_SCHEMA_DIM
 
 # Cache en memoire process-local.
 # Sur Render, ce cache vit par instance et se reconstruit au redemarrage/scale.
 api_cache = {}
 last_snowflake_error = None
+
+
+def quote_ident(identifier):
+    return '"' + str(identifier).replace('"', '""') + '"'
+
+
+def fq_table(schema_name, table_name):
+    database_name = (os.getenv("SNOWFLAKE_DATABASE") or "").strip()
+    schema_part = quote_ident(schema_name)
+    table_part = quote_ident(table_name)
+    if database_name:
+        return f"{quote_ident(database_name)}.{schema_part}.{table_part}"
+    return f"{schema_part}.{table_part}"
 
 
 def to_display_name(canonical_name):
@@ -95,16 +127,24 @@ def normalize_department_name(raw_name):
 
 
 def is_snowflake_configured():
-    required = [
+    return len(get_missing_required_env_vars()) == 0
+
+
+def get_required_env_vars():
+    # Les schemas ont des valeurs par défaut via SNOWFLAKE_SCHEMA_PUBLIC/FACT/DIM/REF,
+    # donc ils ne sont plus bloquants pour la connexion.
+    return [
         "SNOWFLAKE_ACCOUNT",
         "SNOWFLAKE_USER",
         "SNOWFLAKE_ROLE",
         "SNOWFLAKE_WAREHOUSE",
         "SNOWFLAKE_DATABASE",
-        "SNOWFLAKE_SCHEMA",
         "SNOWFLAKE_PRIVATE_KEY_B64",
     ]
-    return all(os.getenv(name) for name in required)
+
+
+def get_missing_required_env_vars():
+    return [name for name in get_required_env_vars() if not os.getenv(name)]
 
 
 def load_private_key_der_bytes():
@@ -164,6 +204,24 @@ def parse_weeks_param(raw_value):
     return unique
 
 
+def parse_activities_param(raw_value):
+    if not raw_value:
+        return []
+
+    items = []
+    seen = set()
+    for token in raw_value.split(","):
+        activity = token.strip()
+        if not activity:
+            continue
+        normalized = activity.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(activity)
+    return items
+
+
 def week_sort_key(week_value):
     text = str(week_value or "").upper()
     if text.startswith("S") and text[1:].isdigit():
@@ -172,23 +230,33 @@ def week_sort_key(week_value):
 
 
 def get_snowflake_query():
+    fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
+    dim_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_DEPARTEMENTS")
+
     custom_query = os.getenv("SNOWFLAKE_KPI_QUERY", "").strip()
     if custom_query:
         return custom_query
 
-    # Lire FREQ_GLOBAL_PER_DEPT et mapper les colonnes
+    # Lire la table fact et joindre la dimension pour recuperer le nom de departement.
     return (
-        "SELECT CODE_DEPARTEMENT as department_name, "
-        "WEEK as week, "
-        "CAST(TOTAL_AURA as INTEGER) as frequentation "
-        "FROM FREQ_GLOBAL_PER_DEPT "
-        "ORDER BY CODE_DEPARTEMENT"
+        "SELECT "
+        "f.CODE_DEPARTEMENT as department_code, "
+        "COALESCE(d.NOM_DEPARTEMENT, f.CODE_DEPARTEMENT) as department_name, "
+        "f.WEEK as week, "
+        "CAST(f.TOTAL_AURA as INTEGER) as frequentation "
+        f"FROM {fact_table} f "
+        f"LEFT JOIN {dim_table} d ON d.CODE_DEPARTEMENT = f.CODE_DEPARTEMENT "
+        "ORDER BY f.CODE_DEPARTEMENT"
     )
 
 
 def fetch_available_weeks_from_snowflake(connection):
+    fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
     with connection.cursor(DictCursor) as cursor:
-        cursor.execute("SELECT DISTINCT WEEK FROM FREQ_GLOBAL_PER_DEPT WHERE WEEK IS NOT NULL")
+        cursor.execute(
+            f"SELECT DISTINCT WEEK FROM {fact_table} WHERE WEEK IS NOT NULL",
+            timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+        )
         rows = cursor.fetchall()
 
     weeks = []
@@ -203,6 +271,8 @@ def fetch_available_weeks_from_snowflake(connection):
 
 def fetch_dataset_from_snowflake(selected_weeks=None):
     selected_weeks = selected_weeks or []
+    fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
+    dim_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_DEPARTEMENTS")
 
     private_key = load_private_key_der_bytes()
 
@@ -212,8 +282,12 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
         role=os.getenv("SNOWFLAKE_ROLE"),
         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
         database=os.getenv("SNOWFLAKE_DATABASE"),
-        schema=os.getenv("SNOWFLAKE_SCHEMA"),
+        schema=SNOWFLAKE_SCHEMA_PUBLIC,
         private_key=private_key,
+        login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+        network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+        socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+        ocsp_fail_open=True,
         session_parameters={"QUERY_TAG": "aura_dashboard_backend"},
     )
 
@@ -227,20 +301,22 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
 
         query = (
             "SELECT "
-            "CODE_DEPARTEMENT as department_name, "
-            "SUM(TOTAL_AURA) as total_aura, "
-            "SUM(RURAL) as rural, "
-            "SUM(URBAIN) as urbain, "
-            "SUM(STATIONS_MONTAGNE) as stations_montagne, "
-            "SUM(VILLAGES_MONTAGNE) as villages_montagne "
-            "FROM FREQ_GLOBAL_PER_DEPT "
+            "f.CODE_DEPARTEMENT as department_code, "
+            "COALESCE(d.NOM_DEPARTEMENT, f.CODE_DEPARTEMENT) as department_name, "
+            "SUM(f.TOTAL_AURA) as total_aura, "
+            "SUM(f.RURAL) as rural, "
+            "SUM(f.URBAIN) as urbain, "
+            "SUM(f.STATIONS_MONTAGNE) as stations_montagne, "
+            "SUM(f.VILLAGES_MONTAGNE) as villages_montagne "
+            f"FROM {fact_table} f "
+            f"LEFT JOIN {dim_table} d ON d.CODE_DEPARTEMENT = f.CODE_DEPARTEMENT "
             f"{where_clause} "
-            "GROUP BY CODE_DEPARTEMENT "
-            "ORDER BY CODE_DEPARTEMENT"
+            "GROUP BY f.CODE_DEPARTEMENT, d.NOM_DEPARTEMENT "
+            "ORDER BY f.CODE_DEPARTEMENT"
         )
 
         with connection.cursor(DictCursor) as cursor:
-            cursor.execute(query)
+            cursor.execute(query, timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
             rows = cursor.fetchall()
     finally:
         connection.close()
@@ -248,7 +324,10 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
     dataset = {}
     for row in rows:
         raw_name = read_ci(row, "department_name")
+        raw_code = read_ci(row, "department_code")
         canonical_name = normalize_department_name(str(raw_name or ""))
+        if not canonical_name and raw_code is not None:
+            canonical_name = normalize_department_name(str(raw_code))
         if not canonical_name:
             continue
 
@@ -262,6 +341,167 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
         dataset[canonical_name]["frequentation"] = dataset[canonical_name]["total_aura"]
 
     return dataset, query, available_weeks
+
+
+def normalize_activities_value(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_text = str(value).strip()
+        if not raw_text:
+            return []
+        # Some Snowflake connectors return ARRAY as JSON-like string.
+        if raw_text.startswith("[") and raw_text.endswith("]"):
+            content = raw_text[1:-1]
+            raw_items = [part.strip().strip('"').strip("'") for part in content.split(",")]
+        else:
+            raw_items = [part.strip() for part in raw_text.split(",")]
+
+    cleaned = []
+    seen = set()
+    for item in raw_items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        cleaned.append(text)
+    return cleaned
+
+
+def read_first_non_empty(data, candidates):
+    for key in candidates:
+        value = read_ci(data, key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def parse_float(value):
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", ".")
+    if not text:
+        return None
+    return float(text)
+
+
+def fetch_stations_from_snowflake(selected_activities=None):
+    selected_activities = selected_activities or []
+    ref_table = fq_table(SNOWFLAKE_SCHEMA_REF, "REF_STATIONS")
+
+    private_key = load_private_key_der_bytes()
+    connection = snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=SNOWFLAKE_SCHEMA_PUBLIC,
+        private_key=private_key,
+        login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+        network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+        socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+        ocsp_fail_open=True,
+        session_parameters={"QUERY_TAG": "aura_dashboard_stations"},
+    )
+
+    try:
+        query = (
+            "SELECT OBJECT_CONSTRUCT_KEEP_NULL(*) AS row_obj "
+            f"FROM {ref_table}"
+        )
+
+        with connection.cursor(DictCursor) as cursor:
+            cursor.execute(query, timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    selected_activities_set = {item.lower() for item in selected_activities}
+    points = []
+    activities_set = set()
+    for row in rows:
+        row_obj = read_ci(row, "row_obj") or {}
+        if not isinstance(row_obj, dict):
+            continue
+
+        lat_raw = read_first_non_empty(row_obj, ["LATITUDE", "LAT", "Y", "COORD_Y"])
+        lon_raw = read_first_non_empty(row_obj, ["LONGITUDE", "LON", "LNG", "X", "COORD_X"])
+
+        lat = None
+        lon = None
+        try:
+            lat = parse_float(lat_raw)
+            lon = parse_float(lon_raw)
+        except (TypeError, ValueError):
+            lat = None
+            lon = None
+
+        if lat is None or lon is None:
+            continue
+
+        activities_raw = read_first_non_empty(row_obj, ["ACTIVITES_LISTE", "ACTIVITES", "ACTIVITES_LIST", "ACTIVITY_LIST"])
+        activities = normalize_activities_value(activities_raw)
+        for activity in activities:
+            activities_set.add(activity)
+
+        if selected_activities_set and not any(activity.lower() in selected_activities_set for activity in activities):
+            continue
+
+        station_name = read_first_non_empty(row_obj, ["NOM_INSTALLATION", "NOM_INSTALLATION_SPORTIVE", "NOM_STATION", "STATION_NAME", "NOM"])
+        department_code = read_first_non_empty(row_obj, ["CODE_DEPARTEMENT", "DEPARTEMENT_CODE", "DEP_CODE"])
+        department_name = read_first_non_empty(row_obj, ["NOM_DEPARTEMENT", "DEPARTEMENT_NOM", "DEP_NOM", "DEPARTEMENT"])
+        equipment_type = read_first_non_empty(row_obj, ["TYPE_EQUIPEMENT", "TYPE_D_EQUIPEMENT_SPORTIF", "TYPE"])
+
+        points.append(
+            {
+                "name": str(station_name or "Installation sans nom").strip(),
+                "department_code": str(department_code or "").strip(),
+                "department_name": str(department_name or "").strip(),
+                "equipment_type": str(equipment_type or "").strip(),
+                "lat": lat,
+                "lon": lon,
+                "activities": activities,
+            }
+        )
+
+    available_activities = sorted(list(activities_set), key=lambda item: str(item).lower())
+    return points, available_activities
+
+
+def get_station_points(selected_activities=None):
+    global last_snowflake_error
+
+    selected_activities = selected_activities or []
+    activity_key = "|".join([item.lower() for item in selected_activities]) if selected_activities else "ALL"
+    cache_key = f"stations:{activity_key}"
+
+    cached_value, hit = get_cache(cache_key)
+    if hit:
+        return cached_value["points"], cached_value["activities_available"], True, cached_value["data_source"]
+
+    if is_snowflake_configured():
+        try:
+            points, activities_available = fetch_stations_from_snowflake(selected_activities)
+            payload = {
+                "points": points,
+                "activities_available": activities_available,
+                "data_source": "snowflake",
+            }
+            set_cache(cache_key, payload)
+            return points, activities_available, False, "snowflake"
+        except Exception as exc:
+            last_snowflake_error = str(exc)
+
+    return [], [], False, "mock"
 
 
 def build_departments_payload(selected_kpi, dataset):
@@ -455,12 +695,183 @@ def department_data(dep_name):
         return jsonify({"error": last_snowflake_error}), 500
 
 
+def extract_activities_from_array(array_value):
+    """
+    Parse Snowflake ARRAY ACTIVITES_LISTE.
+    Peut être: list, string "[...]", ou autre format.
+    Retourne une liste de strings nettoyées.
+    """
+    if not array_value:
+        return []
+    
+    items = []
+    
+    # Si c'est déjà une liste Python
+    if isinstance(array_value, list):
+        for item in array_value:
+            text = str(item or "").strip()
+            if text:
+                items.append(text)
+        return items
+    
+    # Si c'est un string JSON-like "[...]"
+    text = str(array_value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        content = text[1:-1]
+        for part in content.split(","):
+            item_text = part.strip().strip('"').strip("'")
+            if item_text:
+                items.append(item_text)
+        return items
+    
+    # Si c'est un string direct séparé par des virgules
+    if "," in text:
+        for part in text.split(","):
+            item_text = part.strip()
+            if item_text:
+                items.append(item_text)
+        return items
+    
+    # Un seul item
+    if text:
+        items.append(text)
+    
+    return items
+
+
+def fetch_stations_from_snowflake():
+    """
+    Récupère tous les points d'installation depuis REF.REF_STATIONS.
+    Retourne:
+        - station_points: list de dicts avec {name, lat, lon, department_code, department_name, equipment_type, activities}
+        - activities_available: list d'activités distinctes trouvées
+    """
+    ref_table = fq_table(SNOWFLAKE_SCHEMA_REF, "REF_STATIONS")
+    
+    private_key = load_private_key_der_bytes()
+    connection = snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=SNOWFLAKE_SCHEMA_PUBLIC,
+        private_key=private_key,
+        login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+        network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+        socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+        ocsp_fail_open=True,
+        session_parameters={"QUERY_TAG": "aura_dashboard_stations"},
+    )
+    
+    try:
+        with connection.cursor(DictCursor) as cursor:
+            cursor.execute(
+                f"SELECT * FROM {ref_table}",
+                timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+            )
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+    
+    station_points = []
+    activities_set = set()
+    
+    for row in rows:
+        # Récupère les colonnes (case insensitive)
+        lat = read_ci(row, "LATITUDE")
+        lon = read_ci(row, "LONGITUDE")
+        
+        # Convertir en float
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (TypeError, ValueError):
+            continue  # Skip si pas de coordonnées valides
+        
+        # Extraire activités
+        activities_raw = read_ci(row, "ACTIVITES_LISTE")
+        activities = extract_activities_from_array(activities_raw)
+        for activity in activities:
+            activities_set.add(activity)
+        
+        # Construire le point
+        point = {
+            "name": str(read_ci(row, "NOM_INSTALLATION") or "Installation sans nom").strip(),
+            "lat": lat,
+            "lon": lon,
+            "department_code": str(read_ci(row, "CODE_DEPARTEMENT") or "").strip(),
+            "department_name": str(read_ci(row, "NOM_DEPARTEMENT") or "").strip(),
+            "equipment_type": str(read_ci(row, "TYPE_EQUIPEMENT") or "").strip(),
+            "activities": activities,
+        }
+        station_points.append(point)
+    
+    activities_available = sorted(list(activities_set), key=lambda x: str(x).lower())
+    return station_points, activities_available
+
+
+@app.route("/api/stations")
+def stations_data():
+    """
+    Retourne tous les points d'installation avec les activités disponibles.
+    Optionnel: filtrer par activités via ?activities=Activité1,Activité2
+    """
+    global last_snowflake_error
+    
+    try:
+        # Récupérer les stations depuis Snowflake
+        if not is_snowflake_configured():
+            return jsonify({
+                "activities_available": [],
+                "points": [],
+                "data_source": "error",
+                "error": "Snowflake not configured",
+            }), 400
+        
+        station_points, activities_available = fetch_stations_from_snowflake()
+        
+        # Filtrer par activités si demandé
+        selected_activities_param = request.args.get("activities", "")
+        selected_activities = [a.strip() for a in selected_activities_param.split(",") if a.strip()] if selected_activities_param else []
+        
+        filtered_points = station_points
+        if selected_activities:
+            activities_set = set(a.lower() for a in selected_activities)
+            filtered_points = [
+                p for p in station_points
+                if any(activity.lower() in activities_set for activity in p.get("activities", []))
+            ]
+        
+        return jsonify({
+            "activities_available": activities_available,
+            "activities_selected": selected_activities,
+            "points": filtered_points,
+            "data_source": "snowflake",
+            "count": len(filtered_points),
+        }), 200
+    
+    except Exception as exc:
+        last_snowflake_error = str(exc)
+        return jsonify({
+            "activities_available": [],
+            "points": [],
+            "data_source": "error",
+            "error": str(exc),
+        }), 500
+
+
 @app.route("/api/snowflake/status")
 def snowflake_status():
     return jsonify(
         {
             "configured": is_snowflake_configured(),
+            "missing_env_vars": get_missing_required_env_vars(),
             "using_query": get_snowflake_query(),
+            "public_schema": SNOWFLAKE_SCHEMA_PUBLIC,
+            "fact_schema": SNOWFLAKE_FACT_SCHEMA,
+            "dim_schema": SNOWFLAKE_DIM_SCHEMA,
+            "ref_schema": SNOWFLAKE_SCHEMA_REF,
             "last_error": last_snowflake_error,
         }
     )
@@ -475,15 +886,20 @@ def test_freq_globale():
         return jsonify({
             "success": False,
             "error": "Snowflake non configure. Verifiez les variables d'environnement.",
-            "required_env_vars": [
-                "SNOWFLAKE_ACCOUNT",
-                "SNOWFLAKE_USER",
-                "SNOWFLAKE_ROLE",
-                "SNOWFLAKE_WAREHOUSE",
-                "SNOWFLAKE_DATABASE",
-                "SNOWFLAKE_SCHEMA",
-                "SNOWFLAKE_PRIVATE_KEY_B64",
-            ]
+            "required_env_vars": get_required_env_vars(),
+            "missing_env_vars": get_missing_required_env_vars(),
+            "schema_config": {
+                "public_schema": SNOWFLAKE_SCHEMA_PUBLIC,
+                "fact_schema": SNOWFLAKE_FACT_SCHEMA,
+                "dim_schema": SNOWFLAKE_DIM_SCHEMA,
+                "ref_schema": SNOWFLAKE_SCHEMA_REF,
+            },
+            "schema_env_vars_supported": [
+                "SNOWFLAKE_SCHEMA_PUBLIC",
+                "SNOWFLAKE_SCHEMA_FACT",
+                "SNOWFLAKE_SCHEMA_DIM",
+                "SNOWFLAKE_SCHEMA_REF",
+            ],
         }), 400
 
     try:
@@ -496,8 +912,12 @@ def test_freq_globale():
             role=os.getenv("SNOWFLAKE_ROLE"),
             warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
             database=os.getenv("SNOWFLAKE_DATABASE"),
-            schema=os.getenv("SNOWFLAKE_SCHEMA"),
+            schema=SNOWFLAKE_SCHEMA_PUBLIC,
             private_key=private_key,
+            login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+            network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+            socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+            ocsp_fail_open=True,
             session_parameters={"QUERY_TAG": "aura_dashboard_test"},
         )
 
@@ -506,16 +926,20 @@ def test_freq_globale():
         # Test 1: Lister les tables disponibles
         print("[DEBUG] Recuperation des tables disponibles...")
         with connection.cursor() as cursor:
-            cursor.execute("SHOW TABLES;")
+            cursor.execute("SHOW TABLES;", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
             tables = cursor.fetchall()
             table_names = [row[1] for row in tables]  # row[1] est le nom de la table
 
         print(f"[DEBUG] Tables trouvees: {table_names}")
 
         # Test 2: Interroger FREQ_GLOBAL_PER_DEPT
+        fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
         print("[DEBUG] Interrogation de FREQ_GLOBAL_PER_DEPT...")
         with connection.cursor(DictCursor) as cursor:
-            cursor.execute("SELECT * FROM FREQ_GLOBAL_PER_DEPT LIMIT 100;")
+            cursor.execute(
+                f"SELECT * FROM {fact_table} LIMIT 100;",
+                timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+            )
             rows = cursor.fetchall()
 
         print(f"[DEBUG] {len(rows)} lignes recuperees de FREQ_GLOBAL_PER_DEPT")
@@ -534,7 +958,7 @@ def test_freq_globale():
                 "account": os.getenv("SNOWFLAKE_ACCOUNT"),
                 "user": os.getenv("SNOWFLAKE_USER"),
                 "database": os.getenv("SNOWFLAKE_DATABASE"),
-                "schema": os.getenv("SNOWFLAKE_SCHEMA"),
+                "schema": SNOWFLAKE_SCHEMA_PUBLIC,
             },
             "available_tables": table_names,
             "freq_globale_columns": list(data[0].keys()) if data else [],
@@ -552,6 +976,136 @@ def test_freq_globale():
             "error": str(exc),
             "error_type": type(exc).__name__,
             "traceback": traceback.format_exc()
+        }), 500
+
+
+@app.route("/api/snowflake/test/ref-stations")
+def test_ref_stations():
+    """
+    Test de connexion Snowflake et inspection de la table REF_STATIONS.
+    Retourne un echantillon brut + valeurs parsees pour faciliter le debug.
+    """
+    if not is_snowflake_configured():
+        return jsonify({
+            "success": False,
+            "error": "Snowflake non configure. Verifiez les variables d'environnement.",
+            "required_env_vars": get_required_env_vars(),
+            "missing_env_vars": get_missing_required_env_vars(),
+            "schema_config": {
+                "public_schema": SNOWFLAKE_SCHEMA_PUBLIC,
+                "fact_schema": SNOWFLAKE_FACT_SCHEMA,
+                "dim_schema": SNOWFLAKE_DIM_SCHEMA,
+                "ref_schema": SNOWFLAKE_SCHEMA_REF,
+            },
+        }), 400
+
+    try:
+        limit = request.args.get("limit", "20")
+        try:
+            limit_value = int(limit)
+        except ValueError:
+            limit_value = 20
+        limit_value = max(1, min(limit_value, 100))
+
+        private_key = load_private_key_der_bytes()
+        connection = snowflake.connector.connect(
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            user=os.getenv("SNOWFLAKE_USER"),
+            role=os.getenv("SNOWFLAKE_ROLE"),
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            database=os.getenv("SNOWFLAKE_DATABASE"),
+            schema=SNOWFLAKE_SCHEMA_PUBLIC,
+            private_key=private_key,
+            login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+            network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+            socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+            ocsp_fail_open=True,
+            session_parameters={"QUERY_TAG": "aura_dashboard_test_ref_stations"},
+        )
+
+        ref_table = fq_table(SNOWFLAKE_SCHEMA_REF, "REF_STATIONS")
+
+        try:
+            with connection.cursor(DictCursor) as cursor:
+                cursor.execute(
+                    f"SELECT * FROM {ref_table} LIMIT {limit_value}",
+                    timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+                )
+                raw_rows = cursor.fetchall()
+
+            with connection.cursor(DictCursor) as cursor:
+                cursor.execute(
+                    (
+                        "SELECT DISTINCT TRIM(f.value::string) AS activity "
+                        f"FROM {ref_table} s, LATERAL FLATTEN(input => s.ACTIVITES_LISTE) f "
+                        "WHERE f.value IS NOT NULL "
+                        "ORDER BY activity LIMIT 200"
+                    ),
+                    timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+                )
+                activity_rows = cursor.fetchall()
+
+            parsed_preview = []
+            invalid_coords = 0
+            for row in raw_rows:
+                activities = normalize_activities_value(read_ci(row, "ACTIVITES_LISTE"))
+                try:
+                    lat = parse_float(read_ci(row, "LATITUDE"))
+                    lon = parse_float(read_ci(row, "LONGITUDE"))
+                except (TypeError, ValueError):
+                    lat = None
+                    lon = None
+
+                if lat is None or lon is None:
+                    invalid_coords += 1
+
+                parsed_preview.append(
+                    {
+                        "name": read_ci(row, "NOM_INSTALLATION"),
+                        "department_code": read_ci(row, "CODE_DEPARTEMENT"),
+                        "department_name": read_ci(row, "NOM_DEPARTEMENT"),
+                        "equipment_type": read_ci(row, "TYPE_EQUIPEMENT"),
+                        "lat": lat,
+                        "lon": lon,
+                        "activities_count": len(activities),
+                        "activities_sample": activities[:8],
+                    }
+                )
+
+            activities_available = []
+            for item in activity_rows:
+                value = read_ci(item, "activity")
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if text:
+                    activities_available.append(text)
+
+            columns = sorted(list(raw_rows[0].keys())) if raw_rows else []
+
+            return jsonify({
+                "success": True,
+                "table": f"{SNOWFLAKE_SCHEMA_REF}.REF_STATIONS",
+                "row_count": len(raw_rows),
+                "requested_limit": limit_value,
+                "columns": columns,
+                "activity_count": len(activities_available),
+                "activities_available": activities_available,
+                "invalid_coordinate_rows": invalid_coords,
+                "raw_sample": raw_rows[:5],
+                "parsed_sample": parsed_preview[:10],
+            }), 200
+        finally:
+            connection.close()
+
+    except Exception as exc:
+        import traceback
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+            "table": f"{SNOWFLAKE_SCHEMA_REF}.REF_STATIONS",
         }), 500
 
 
