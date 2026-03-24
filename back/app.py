@@ -182,6 +182,37 @@ def global_holidays_data():
     
     return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}})
 
+
+@app.route("/api/global/frequentation")
+def global_frequentation_data():
+    year = max(2024, int(request.args.get("year", "2024").strip() if request.args.get("year", "2024").isdigit() else 2024))
+    selected_weeks = parse_weeks_param(request.args.get("weeks", ""))
+    weeks_key = ",".join(selected_weeks) if selected_weeks else "ALL"
+
+    cache_key = f"api_global_frequentation:{year}:{weeks_key}"
+    cached_payload, hit = get_cache(cache_key)
+    if hit:
+        return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
+
+    data_source = "mock"
+    try:
+        if is_snowflake_configured():
+            payload = kpi_service.fetch_global_frequentation_from_snowflake(year, selected_weeks)
+            data_source = "snowflake" if year == 2024 else "ml_prediction"
+        else:
+            payload = kpi_service.build_mock_global_frequentation(year, selected_weeks)
+            data_source = "mock" if year == 2024 else "ml_prediction"
+    except Exception as exc:
+        set_last_error(str(exc))
+        payload = kpi_service.build_mock_global_frequentation(year, selected_weeks)
+        data_source = "mock" if year == 2024 else "ml_prediction"
+
+    payload["data_source"] = data_source
+    payload["snowflake_error"] = get_last_error()
+    set_cache(cache_key, payload)
+
+    return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}})
+
 @app.route("/api/stations")
 def stations_data():
     try:

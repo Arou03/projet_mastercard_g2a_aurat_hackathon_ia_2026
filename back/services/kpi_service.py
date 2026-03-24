@@ -123,6 +123,66 @@ def build_departments_payload(selected_kpi, dataset):
         items.append({"name": to_display_name(canonical_name), "frequentation": frequentation, "score": score})
     return items
 
+
+def fetch_global_frequentation_from_snowflake(year=2024, selected_weeks=None):
+    selected_weeks = selected_weeks or []
+    fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
+    year = max(2024, int(year))
+
+    connection = get_connection("aura_global_frequentation")
+    try:
+        where_clause = f"WHERE WEEK IN ({', '.join([f'{w!r}' for w in selected_weeks])})" if selected_weeks else ""
+        query = (
+            f"SELECT WEEK AS week, SUM(TOTAL_AURA) AS total_aura "
+            f"FROM {fact_table} {where_clause} GROUP BY WEEK"
+        )
+        with connection.cursor(DictCursor) as cursor:
+            cursor.execute(query, timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    week_values = {}
+    for row in rows:
+        week = week_label(read_ci(row, "week"))
+        if not week:
+            continue
+        week_values[week] = to_int(read_ci(row, "total_aura"))
+
+    ordered_weeks = sorted(week_values.keys(), key=season_week_sort)
+    observed_values = [week_values[w] for w in ordered_weeks]
+    growth_factor = 1.0 + (0.05 * (year - 2024))
+    values = observed_values if year == 2024 else [to_int(v * growth_factor) for v in observed_values]
+
+    return {
+        "weeks": ordered_weeks,
+        "values": values,
+        "year": year,
+    }
+
+
+def build_mock_global_frequentation(year=2024, selected_weeks=None):
+    selected_weeks = selected_weeks or []
+    year = max(2024, int(year))
+    weeks = ["S51", "S52"] + [f"S{i}" for i in range(1, 16)]
+    if selected_weeks:
+        selected_set = set(selected_weeks)
+        weeks = [w for w in weeks if w in selected_set]
+
+    base_total = sum(values.get("total_aura", 0) for values in DEPARTMENT_KPIS.values())
+    growth_factor = 1.0 + (0.05 * (year - 2024))
+
+    values = []
+    for index, _ in enumerate(weeks):
+        variation = 1 + (0.08 * ((index % 5) - 2))
+        values.append(to_int(base_total * variation * growth_factor))
+
+    return {
+        "weeks": weeks,
+        "values": values,
+        "year": year,
+    }
+
 def build_mock_department_timeline(canonical_name, year=2024):
     base = DEPARTMENT_KPIS.get(canonical_name, DEPARTMENT_KPIS["Savoie"])
     weeks = ["S51", "S52"] + [f"S{i}" for i in range(1, 16)]

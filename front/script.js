@@ -319,7 +319,7 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
     };
 }
 
-function drawGlobalMlTrend(years, totals) {
+function drawGlobalMlTrend(weeks, values) {
     if (!globalMlCanvas) {
         return;
     }
@@ -329,9 +329,9 @@ function drawGlobalMlTrend(years, totals) {
     const chartW = width - pad.left - pad.right;
     const chartH = height - pad.top - pad.bottom;
 
-    const values = totals.filter(v => typeof v === "number" && !Number.isNaN(v));
-    const minValue = values.length ? Math.min(...values) : 0;
-    const maxValue = values.length ? Math.max(...values) : 100;
+    const validValues = values.filter(v => typeof v === "number" && !Number.isNaN(v));
+    const minValue = validValues.length ? Math.min(...validValues) : 0;
+    const maxValue = validValues.length ? Math.max(...validValues) : 100;
     const range = Math.max(1, maxValue - minValue);
 
     ctx.clearRect(0, 0, width, height);
@@ -349,39 +349,51 @@ function drawGlobalMlTrend(years, totals) {
     }
 
     const xFromIndex = index => {
-        if (years.length <= 1) return pad.left;
-        return pad.left + (index / (years.length - 1)) * chartW;
+        if (weeks.length <= 1) return pad.left;
+        return pad.left + (index / (weeks.length - 1)) * chartW;
     };
     const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
 
     ctx.strokeStyle = "#086cb2";
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    totals.forEach((value, index) => {
+    let started = false;
+    values.forEach((value, index) => {
         if (typeof value !== "number" || Number.isNaN(value)) return;
         const x = xFromIndex(index);
         const y = yFromValue(value);
-        if (index === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+        } else {
+            ctx.lineTo(x, y);
+        }
     });
-    ctx.stroke();
+    if (started) {
+        ctx.stroke();
+    }
 
-    totals.forEach((value, index) => {
+    values.forEach((value, index) => {
         if (typeof value !== "number" || Number.isNaN(value)) return;
         const x = xFromIndex(index);
         const y = yFromValue(value);
-        const isSelected = Number(years[index]) === Number(currentYear);
         ctx.beginPath();
-        ctx.fillStyle = isSelected ? "#d14247" : "#086cb2";
-        ctx.arc(x, y, isSelected ? 5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#086cb2";
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
         ctx.fill();
     });
 
     ctx.fillStyle = "#162c4a";
     ctx.font = "12px Luciole, Segoe UI, sans-serif";
     ctx.textAlign = "center";
-    years.forEach((year, index) => {
-        ctx.fillText(String(year), xFromIndex(index), height - 10);
+    const tickIndexes = [0, Math.floor((weeks.length - 1) / 3), Math.floor(((weeks.length - 1) * 2) / 3), Math.max(0, weeks.length - 1)];
+    const seen = new Set();
+    tickIndexes.forEach(index => {
+        if (seen.has(index) || !weeks[index]) {
+            return;
+        }
+        seen.add(index);
+        ctx.fillText(String(weeks[index]), xFromIndex(index), height - 10);
     });
 
     ctx.textAlign = "right";
@@ -389,26 +401,40 @@ function drawGlobalMlTrend(years, totals) {
     ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
 }
 
-function renderGlobalMlTrendFromTotal(totalCurrentYear, source) {
+function fetchGlobalMlTrend() {
     if (!globalMlCanvas || !globalMlStatus) {
-        return;
+        return Promise.resolve();
     }
 
-    const years = [2024, 2025, 2026, 2027];
-    const numericTotal = Number(totalCurrentYear);
-    if (!Number.isFinite(numericTotal)) {
-        globalMlStatus.textContent = "Aucune donnee pour la courbe ML";
-        return;
+    globalMlStatus.textContent = "Chargement...";
+    const query = new URLSearchParams({ year: String(currentYear) });
+    if (selectedWeeks.length > 0) {
+        query.set("weeks", selectedWeeks.join(","));
     }
 
-    // Le backend utilise une projection lineaire: base * (1 + 0.05 * (annee - 2024)).
-    const currentFactor = 1 + (0.05 * (currentYear - 2024));
-    const base2024 = currentFactor > 0 ? (numericTotal / currentFactor) : numericTotal;
-    const totals = years.map(year => Math.round(base2024 * (1 + (0.05 * (year - 2024)))));
-
-    drawGlobalMlTrend(years, totals);
-    globalMlStatus.textContent = `Serie 2024-2027 (${sourceLabel(source)})`;
-    appendDebugLine("ml trend rendered", { currentYear, totalCurrentYear: numericTotal, source });
+    return fetchWithTimeout(`${API_URL}/api/global/frequentation?${query.toString()}`)
+        .then(res => {
+            if (!res.ok) {
+                throw new Error(`API frequentation failed: ${res.status}`);
+            }
+            return res.json();
+        })
+        .then(payload => {
+            const weeks = normalizeWeeksOrder(payload.weeks || []);
+            const valuesByWeek = new Map((payload.weeks || []).map((week, index) => [String(week).toUpperCase(), payload.values?.[index]]));
+            const values = weeks.map(week => valuesByWeek.get(week));
+            drawGlobalMlTrend(weeks, values);
+            globalMlStatus.textContent = `Annee ${currentYear} (${sourceLabel(payload.data_source)})`;
+            appendDebugLine("/api/global/frequentation", {
+                source: payload.data_source,
+                weeks: weeks.length,
+                year: currentYear,
+            });
+        })
+        .catch(error => {
+            globalMlStatus.textContent = "Erreur chargement frequentation";
+            appendDebugLine("/api/global/frequentation error", { message: error?.message || "unknown" });
+        });
 }
 
 function fetchGlobalHolidays() {
@@ -1037,9 +1063,7 @@ function fetchKpiData() {
                 appendDebugLine("snowflake_error", { message: payload.snowflake_error });
             }
             checkSnowflakeStatus();
-
-            const totalCurrentYear = (payload.departments || []).reduce((sum, dep) => sum + (Number(dep.score) || 0), 0);
-            renderGlobalMlTrendFromTotal(totalCurrentYear, payload.data_source || "inconnue");
+            fetchGlobalMlTrend();
         })
         .catch(error => {
             if (error && error.name === "AbortError") {
