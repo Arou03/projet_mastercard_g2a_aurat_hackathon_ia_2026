@@ -228,7 +228,51 @@ def predict_endpoint():
         
     except Exception as exc:
         return jsonify({
-            "success": False, 
+            "success": False,
+            "error": "Une erreur inattendue est survenue lors de la prédiction.",
+            "details": str(exc),
+            "traceback": traceback.format_exc()
+        }), 500
+
+@app.route("/api/predict/expenses", methods=["POST"])
+def predict_expenses_endpoint():
+    """
+    Endpoint POST pour l'inférence du modèle de dépenses internationales.
+    Attendu : un JSON contenant les 10 features requises.
+    """
+    try:
+        input_data = request.get_json()
+
+        if not input_data:
+            return jsonify({
+                "success": False,
+                "error": "Aucune donnée JSON fournie dans le corps de la requête"
+            }), 400
+
+        predicted_value = ml_service.predict_expenses(input_data)
+
+        return jsonify({
+            "success": True,
+            "prediction": predicted_value
+        }), 200
+
+    except FileNotFoundError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Le modèle ML est introuvable sur le serveur.",
+            "details": str(exc)
+        }), 500
+
+    except ValueError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Erreur de format de données ou de features manquantes.",
+            "details": str(exc)
+        }), 400
+
+    except Exception as exc:
+        return jsonify({
+            "success": False,
             "error": "Une erreur inattendue est survenue lors de la prédiction.",
             "details": str(exc),
             "traceback": traceback.format_exc()
