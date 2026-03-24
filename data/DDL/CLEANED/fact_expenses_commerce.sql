@@ -1,0 +1,30 @@
+create or replace dynamic table M2_ISD_EQUIPE_5_DB.CLEANED.FACT_EXPENSES_COMMERCE(
+	SATURDAY,
+	MONTANT,
+	TYPE_COMMERCE,
+	SAISON,
+	ANNEE,
+	MOIS,
+	SEMAINE
+) target_lag = '1 hour' refresh_mode = AUTO initialize = ON_CREATE warehouse = HACKATHON_WH
+ as
+SELECT
+    TO_TIMESTAMP(SATURDAY) as SATURDAY,
+
+    -- nettoyage montant
+    CASE 
+        WHEN MONTANT < 0 THEN NULL
+        ELSE MONTANT
+    END AS MONTANT,
+
+    -- nettoyage texte
+    UPPER(TRIM(TYPE_COMMERCE)) AS TYPE_COMMERCE,
+    UPPER(TRIM(SAISON)) AS SAISON,
+
+    -- enrichissement temporel (très utile pour Power BI)
+    YEAR(SATURDAY) AS ANNEE,
+    MONTH(SATURDAY) AS MOIS,
+    WEEK(SATURDAY) AS SEMAINE
+
+FROM M2_ISD_EQUIPE_5_DB.RAW.DEPENSES_COMMERCE
+WHERE SATURDAY IS NOT NULL;

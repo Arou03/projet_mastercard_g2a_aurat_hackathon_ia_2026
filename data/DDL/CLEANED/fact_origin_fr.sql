@@ -1,0 +1,13 @@
+create or replace dynamic table M2_ISD_EQUIPE_5_DB.CLEANED.FACT_ORIGIN_FR(
+	SATURDAY,
+	CODE_REGION,
+	SAISON,
+	VOLUME
+) target_lag = '1 hour' refresh_mode = AUTO initialize = ON_CREATE warehouse = HACKATHON_WH
+ as
+SELECT
+    TO_TIMESTAMP(SATURDAY) as SATURDAY,
+    CODE_REGION,
+    SAISON,
+    VOLUME
+FROM M2_ISD_EQUIPE_5_DB.RAW.PROVENANCES_FR;
