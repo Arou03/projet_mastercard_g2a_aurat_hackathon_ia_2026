@@ -389,48 +389,26 @@ function drawGlobalMlTrend(years, totals) {
     ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
 }
 
-function fetchGlobalMlTrend() {
+function renderGlobalMlTrendFromTotal(totalCurrentYear, source) {
     if (!globalMlCanvas || !globalMlStatus) {
-        return Promise.resolve();
+        return;
     }
 
-    globalMlStatus.textContent = "Chargement...";
     const years = [2024, 2025, 2026, 2027];
+    const numericTotal = Number(totalCurrentYear);
+    if (!Number.isFinite(numericTotal)) {
+        globalMlStatus.textContent = "Aucune donnee pour la courbe ML";
+        return;
+    }
 
-    const requests = years.map(year => {
-        const query = new URLSearchParams({
-            kpi: "total_aura",
-            year: String(year),
-        });
-        if (selectedWeeks.length > 0) {
-            query.set("weeks", selectedWeeks.join(","));
-        }
-        return fetchWithTimeout(`${API_URL}/api/data?${query.toString()}`)
-            .then(res => {
-                if (!res.ok) {
-                    throw new Error(`API data failed: ${res.status}`);
-                }
-                return res.json();
-            })
-            .then(payload => {
-                const total = (payload.departments || []).reduce((sum, dep) => sum + (Number(dep.score) || 0), 0);
-                return { year, total, source: payload.data_source || "inconnue" };
-            });
-    });
+    // Le backend utilise une projection lineaire: base * (1 + 0.05 * (annee - 2024)).
+    const currentFactor = 1 + (0.05 * (currentYear - 2024));
+    const base2024 = currentFactor > 0 ? (numericTotal / currentFactor) : numericTotal;
+    const totals = years.map(year => Math.round(base2024 * (1 + (0.05 * (year - 2024)))));
 
-    return Promise.all(requests)
-        .then(results => {
-            const sorted = [...results].sort((a, b) => a.year - b.year);
-            const yearsData = sorted.map(item => item.year);
-            const totalsData = sorted.map(item => item.total);
-            drawGlobalMlTrend(yearsData, totalsData);
-            globalMlStatus.textContent = `Serie 2024-2027 (${sourceLabel(sorted[0]?.source)})`;
-            appendDebugLine("/api/data ML trend", sorted);
-        })
-        .catch(error => {
-            globalMlStatus.textContent = "Erreur chargement graphique ML";
-            appendDebugLine("/api/data ML trend error", { message: error?.message || "unknown" });
-        });
+    drawGlobalMlTrend(years, totals);
+    globalMlStatus.textContent = `Serie 2024-2027 (${sourceLabel(source)})`;
+    appendDebugLine("ml trend rendered", { currentYear, totalCurrentYear: numericTotal, source });
 }
 
 function fetchGlobalHolidays() {
@@ -1059,7 +1037,9 @@ function fetchKpiData() {
                 appendDebugLine("snowflake_error", { message: payload.snowflake_error });
             }
             checkSnowflakeStatus();
-            fetchGlobalMlTrend();
+
+            const totalCurrentYear = (payload.departments || []).reduce((sum, dep) => sum + (Number(dep.score) || 0), 0);
+            renderGlobalMlTrendFromTotal(totalCurrentYear, payload.data_source || "inconnue");
         })
         .catch(error => {
             if (error && error.name === "AbortError") {
