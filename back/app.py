@@ -362,6 +362,120 @@ def predict_expenses_endpoint():
             "traceback": traceback.format_exc()
         }), 500
 
+
+@app.route("/api/predict/expenses/context", methods=["GET"])
+def predict_expenses_context_endpoint():
+    """
+    Endpoint GET pour prédire les dépenses à partir du contexte métier.
+    Entrées attendues (query params):
+      - country / pays / code_pays
+      - week / week_of_year
+      - season (optionnel)
+      - month (optionnel)
+      - feat_<FEATURE_NAME> (optionnel) pour override des features du modèle
+    """
+    try:
+        country_code = (
+            request.args.get("country")
+            or request.args.get("pays")
+            or request.args.get("code_pays")
+            or ""
+        ).strip().upper()
+
+        week_value = (
+            request.args.get("week")
+            or request.args.get("week_of_year")
+            or ""
+        ).strip()
+
+        season = (request.args.get("season") or request.args.get("saison") or "").strip()
+        month_value = (request.args.get("month") or request.args.get("mois") or "").strip()
+
+        if not country_code:
+            return jsonify({
+                "success": False,
+                "error": "Paramètre manquant: country (ou pays / code_pays)"
+            }), 400
+
+        if not week_value or not week_value.isdigit():
+            return jsonify({
+                "success": False,
+                "error": "Paramètre invalide: week (ou week_of_year) doit être un entier 1..52"
+            }), 400
+
+        week_of_year = int(week_value)
+        if week_of_year < 1 or week_of_year > 52:
+            return jsonify({
+                "success": False,
+                "error": "week_of_year doit être compris entre 1 et 52"
+            }), 400
+
+        month = int(month_value) if month_value.isdigit() else None
+
+        overrides = {}
+        for key, value in request.args.items():
+            if key.startswith("feat_"):
+                feature_name = key[len("feat_"):].strip().upper()
+                if feature_name:
+                    overrides[feature_name] = value
+
+        cache_key = f"api_predict_expenses_ctx:{country_code}:{week_of_year}:{season or 'NONE'}:{month if month is not None else 'NONE'}:{';'.join([f'{k}={overrides[k]}' for k in sorted(overrides.keys())]) if overrides else 'NO_OVERRIDES'}"
+        cached_payload, hit = get_cache(cache_key)
+        if hit:
+            return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
+
+        result = ml_service.predict_expenses_from_context(
+            country_code=country_code,
+            week_of_year=week_of_year,
+            season=season or None,
+            month=month,
+            overrides=overrides,
+        )
+
+        payload = {
+            "success": True,
+            "context": {
+                "country": country_code,
+                "week_of_year": week_of_year,
+                "season": season or None,
+                "month": month,
+            },
+            "prediction": result["prediction"],
+            "features_used": result["features_used"],
+            "feature_source": result["feature_source"],
+            "overrides": overrides,
+            "data_source": "snowflake",
+        }
+        set_cache(cache_key, payload)
+
+        return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
+
+    except FileNotFoundError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Le modèle ML des dépenses est introuvable.",
+            "details": str(exc)
+        }), 500
+    except LookupError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Aucune ligne de features trouvée pour ce contexte.",
+            "details": str(exc)
+        }), 404
+    except ValueError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Contexte ou features invalides.",
+            "details": str(exc)
+        }), 400
+    except Exception as exc:
+        return jsonify({
+            "success": False,
+            "error": "Erreur inattendue lors de la prédiction contextuelle des dépenses.",
+            "details": str(exc),
+            "traceback": traceback.format_exc()
+        }), 500
+
 # --- ROUTES DE DIAGNOSTIC SNOWFLAKE ---
 
 @app.route("/api/snowflake/status")
