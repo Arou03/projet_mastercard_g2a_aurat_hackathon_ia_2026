@@ -182,20 +182,28 @@ function displaySuccessResults(data) {
 }
 
 function displayErrorResults(data) {
+    const missingEnv = Array.isArray(data.missing_env_vars) ? data.missing_env_vars : [];
+    const diagnostic = data.diagnostic || {};
+    const diagnosticLines = [];
+    if (diagnostic.database) diagnosticLines.push(`• Base: ${escapeHtml(diagnostic.database)}`);
+    if (diagnostic.schema) diagnosticLines.push(`• Schema: ${escapeHtml(diagnostic.schema)}`);
+    if (diagnostic.expected_table) diagnosticLines.push(`• Table attendue: ${escapeHtml(diagnostic.expected_table)}`);
+
+    const envBlock = missingEnv.length
+        ? `<br><br><strong>Variables manquantes:</strong><br>${missingEnv.map(v => `• ${escapeHtml(v)}`).join("<br>")}`
+        : "";
+
+    const diagnosticBlock = diagnosticLines.length
+        ? `<br><br><strong>Diagnostic:</strong><br>${diagnosticLines.join("<br>")}`
+        : "";
+
     const errorMessage = `
         <div class="error-message">
             <strong>Erreur Snowflake:</strong><br>
             ${escapeHtml(data.error)}<br><br>
             <strong>Type:</strong> ${escapeHtml(data.error_type || "Unknown")}
-        </div>
-        <div class="info-card" style="background: #fff3e0; border-left-color: #ff9800; color: #e65100;">
-            <strong>Diagnostic:</strong><br>
-            Verifiez les variables d'environnement:<br>
-            • SNOWFLAKE_ACCOUNT<br>
-            • SNOWFLAKE_USER<br>
-            • SNOWFLAKE_PRIVATE_KEY_B64<br>
-            • SNOWFLAKE_DATABASE<br>
-            • SNOWFLAKE_SCHEMA
+            ${envBlock}
+            ${diagnosticBlock}
         </div>
     `;
     resultsContainer.appendChild(createResultSection("Erreur", errorMessage));

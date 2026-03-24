@@ -311,38 +311,58 @@ def snowflake_status():
 @app.route("/api/snowflake/test/freq-globale")
 def snowflake_test_freq_globale():
     """Test endpoint pour valider la connexion Snowflake et la table FREQ_GLOBAL_PER_DEPT"""
-    if not is_snowflake_configured():
+    missing_env = get_missing_required_env_vars()
+    if missing_env:
         return jsonify({
             "success": False,
-            "error": "Snowflake non configuré",
-            "missing_env_vars": get_missing_required_env_vars()
+            "error": "Snowflake non configure",
+            "error_type": "CONFIGURATION_ERROR",
+            "missing_env_vars": missing_env
         }), 400
     
+    connection = None
     try:
         connection = get_connection("aura_snowflake_test")
+        database_name = (os.getenv("SNOWFLAKE_DATABASE") or "").strip()
+        schema_name = SNOWFLAKE_FACT_SCHEMA
+        expected_table = "FREQ_GLOBAL_PER_DEPT"
         
         with connection.cursor(DictCursor) as cursor:
-            fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
-            
-            # Get row count
+            escaped_database = database_name.replace('"', '""')
+            info_schema_table = f'"{escaped_database}".INFORMATION_SCHEMA.TABLES' if escaped_database else "INFORMATION_SCHEMA.TABLES"
+            cursor.execute(
+                f"SELECT TABLE_NAME FROM {info_schema_table} WHERE TABLE_SCHEMA = %s ORDER BY TABLE_NAME",
+                (schema_name.upper(),),
+                timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS,
+            )
+            tables_result = cursor.fetchall() or []
+            available_tables = [str(t.get("TABLE_NAME") or t.get("table_name") or "") for t in tables_result]
+
+            if expected_table not in {name.upper() for name in available_tables}:
+                return jsonify({
+                    "success": False,
+                    "error": f"Table introuvable: {expected_table}",
+                    "error_type": "OBJECT_NOT_FOUND",
+                    "diagnostic": {
+                        "database": database_name,
+                        "schema": schema_name,
+                        "expected_table": expected_table,
+                        "available_tables": available_tables,
+                    },
+                }), 404
+
+            fact_table = fq_table(schema_name, expected_table)
+
             cursor.execute(f"SELECT COUNT(*) as row_count FROM {fact_table}", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
             row_count_result = cursor.fetchone()
             freq_globale_row_count = row_count_result.get("ROW_COUNT", 0) if row_count_result else 0
-            
-            # Get columns
+
             cursor.execute(f"SELECT * FROM {fact_table} LIMIT 1", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
             freq_globale_columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            
-            # Get sample
+
             cursor.execute(f"SELECT * FROM {fact_table} LIMIT 5", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
             freq_globale_sample = cursor.fetchall()
-            
-            # Get available tables in schema
-            cursor.execute(f"SHOW TABLES IN SCHEMA {fq_table(SNOWFLAKE_FACT_SCHEMA, '')}", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
-            tables_result = cursor.fetchall()
-            available_tables = [t.get("name", "") for t in tables_result] if tables_result else []
-        
-        connection.close()
+
         set_last_error(None)
         
         return jsonify({
@@ -351,7 +371,7 @@ def snowflake_test_freq_globale():
                 "account": os.getenv("SNOWFLAKE_ACCOUNT", "N/A"),
                 "user": os.getenv("SNOWFLAKE_USER", "N/A"),
                 "database": os.getenv("SNOWFLAKE_DATABASE", "N/A"),
-                "schema": SNOWFLAKE_FACT_SCHEMA
+                "schema": schema_name
             },
             "freq_globale_row_count": freq_globale_row_count,
             "freq_globale_columns": freq_globale_columns,
@@ -360,12 +380,35 @@ def snowflake_test_freq_globale():
         })
     
     except Exception as exc:
-        set_last_error(str(exc))
+        message = str(exc)
+        set_last_error(message)
+
+        error_type = "UNKNOWN_ERROR"
+        if "Object does not exist" in message:
+            error_type = "OBJECT_NOT_FOUND"
+        elif "authentication" in message.lower() or "private key" in message.lower():
+            error_type = "AUTHENTICATION_ERROR"
+        elif "Database" in message or "Schema" in message:
+            error_type = "CONFIGURATION_ERROR"
+
         return jsonify({
             "success": False,
-            "error": str(exc),
-            "snowflake_error": get_last_error()
+            "error": message,
+            "error_type": error_type,
+            "snowflake_error": get_last_error(),
+            "missing_env_vars": get_missing_required_env_vars(),
+            "diagnostic": {
+                "database": os.getenv("SNOWFLAKE_DATABASE", ""),
+                "schema": SNOWFLAKE_FACT_SCHEMA,
+                "expected_table": "FREQ_GLOBAL_PER_DEPT",
+            },
         }), 500
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     app.run(debug=True)
