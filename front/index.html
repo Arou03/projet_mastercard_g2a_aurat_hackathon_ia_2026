@@ -1,18 +1,87 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Dashboard Hackathon</title>
+    <title>Dashboard AURA</title>
+
     <link rel="stylesheet" href="style.css">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
+
 <body>
 
-    <h1>Frontend Static Page</h1>
+<!-- Theme toggle button -->
+<button id="themeToggle" class="theme-toggle" type="button" title="Basculer le thème">🌙</button>
 
-    <button onclick="callAPI()">Call Flask API</button>
+<div class="layout">
 
-    <p id="result">Result will appear here</p>
+    <!-- CARTE -->
+    <div class="panel map-panel">
+        <h2>Carte AURA</h2>
+        <div class="map-frame">
+            <div id="map"></div>
+            <button id="dataToggle" class="map-toggle" type="button" title="Afficher les donnees">☰</button>
+            <div id="dataDrawer" class="map-drawer hidden">
+                <h3>Donnees carte</h3>
+                <div class="drawer-section">
+                    <p class="drawer-title">Zones (1 choix max)</p>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="none"> Aucun remplissage</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="total_aura" checked> Total AURA</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="rural"> Rural</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="urbain"> Urbain</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="stations_montagne"> Stations montagne</label>
+                    <label><input type="radio" name="areaFill" class="area-filter" value="villages_montagne"> Villages montagne</label>
+                </div>
 
-    <script src="script.js"></script>
+                <div class="drawer-section">
+                    <p class="drawer-title">Semaines</p>
+                    <div id="weekFilters" class="week-filters">Chargement...</div>
+                </div>
+
+                <div class="drawer-section">
+                    <p class="drawer-title">Activites stations (multi-selection)</p>
+                    <label><input type="checkbox" id="selectAllActivities" checked> Tout selectionner</label>
+                    <div id="stationActivityFilters" class="week-filters">Chargement...</div>
+                </div>
+            </div>
+        </div>
+        <div id="legend" class="legend"></div>
+        <div id="mapResizeHandle" class="map-resize-handle" title="Redimensionner la carte"></div>
+    </div>
+
+    <!-- VISU -->
+    <div class="panel viz-panel">
+        <div class="panel-title-row">
+            <h2>Visualisations globales</h2>
+            <select id="globalYearSelector" class="year-select">
+                <option value="2024">2024 (données observées)</option>
+                <option value="2025">2025 (prédiction ML)</option>
+                <option value="2026">2026 (prédiction ML)</option>
+                <option value="2027">2027 (prédiction ML)</option>
+            </select>
+        </div>
+        <div class="debug-box">
+            <button id="debugToggle" class="debug-toggle" type="button">Console debug</button>
+            <pre id="debugConsole" class="debug-console hidden">Initialisation...</pre>
+        </div>
+        <p class="api-status" id="apiStatus">Chargement des donnees...</p>
+
+        <section class="holiday-panel">
+            <div class="holiday-panel-head">
+                <h3>Vacances scolaires par pays</h3>
+                <p id="globalHolidayStatus">Chargement...</p>
+            </div>
+            <canvas id="globalHolidayTimeline" class="dep-chart" width="1200" height="280"></canvas>
+            <div id="globalHolidayLegend" class="timeline-legend"></div>
+        </section>
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="script.js"></script>
+
 </body>
 </html>

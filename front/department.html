@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Detail Departement</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dep-page">
+
+    <button id="themeToggle" class="theme-toggle" type="button" title="Basculer le theme">🌙</button>
+
+    <h1 id="title">Departement</h1>
+    <p><a href="index.html">Retour a la carte</a></p>
+
+    <!-- Year selector panel - prominent -->
+    <div class="dep-year-selector-panel">
+        <label for="yearSelector">Annee:</label>
+        <select id="yearSelector" class="dep-year-select">
+            <option value="2024">2024 (données observées)</option>
+            <option value="2025">2025 (prédiction ML)</option>
+            <option value="2026">2026 (prédiction ML)</option>
+            <option value="2027">2027 (prédiction ML)</option>
+        </select>
+        <p id="yearInfo" class="dep-year-info">Données observées dans FREQ_GLOBAL_PER_DEPT</p>
+    </div>
+
+    <div class="dep-vis-stack">
+        <section class="dep-panel">
+            <div class="dep-panel-head">
+                <h2>Frequentation et features dans le temps</h2>
+                <p id="timelineStatus" class="dep-panel-status">Chargement...</p>
+            </div>
+            <canvas id="timelineChart" class="dep-chart" width="1200" height="380"></canvas>
+            <div id="timelineLegend" class="timeline-legend"></div>
+        </section>
+
+        <section class="dep-panel">
+            <div class="dep-panel-head">
+                <h2>Vacances scolaires par pays</h2>
+                <p class="dep-panel-status">Meme echelle de semaines que le graphique ci-dessus</p>
+            </div>
+            <canvas id="holidayTimeline" class="dep-chart" width="1200" height="300"></canvas>
+            <div id="holidayLegend" class="timeline-legend"></div>
+        </section>
+
+        <div id="departmentError" class="dep-error hidden">
+            Impossible de charger les donnees temporelles du departement.
+        </div>
+    </div>
+
+    <script src="department.js"></script>
+
+</body>
+</html>

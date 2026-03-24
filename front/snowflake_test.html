@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Connexion Snowflake - AURA Dashboard</title>
+    <link rel="stylesheet" href="snowflake_test.css">
+</head>
+<body>
+    <button id="themeToggle" class="theme-toggle" type="button" title="Basculer le theme">🌙</button>
+
+    <div class="container">
+        <div class="header">
+            <h1>Test Connexion Snowflake</h1>
+            <p>AURA Dashboard - Pipeline de Données</p>
+        </div>
+
+        <div class="content">
+            <div class="button-group">
+                <button class="btn-primary" id="testBtn" type="button">
+                    ▶ Lancer le Test
+                </button>
+                <button class="btn-secondary" id="clearBtn" type="button">
+                    🗑 Effacer Résultats
+                </button>
+                <button class="btn-secondary" id="backBtn" type="button">
+                    ← Retour au Dashboard
+                </button>
+            </div>
+
+            <div id="statusBadge" style="display: none;"></div>
+
+            <!-- Résultats -->
+            <div id="resultsContainer"></div>
+        </div>
+
+        <div class="footer">
+            <p>Cette page teste la connexion Snowflake et affiche les données brutes de FREQ_GLOBAL_PER_DEPT</p>
+            <p style="margin-top: 10px;">
+                <a href="index.html" class="back-link">← Retour au Dashboard</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="snowflake_test.js"></script>
+</body>
+</html>
