@@ -1,10 +1,12 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import traceback
+import os
 
 # Imports de notre nouvelle architecture modulaire
-from config import VALID_KPIS, CACHE_TTL_SECONDS, DEPARTMENT_KPIS, SNOWFLAKE_SCHEMA_PUBLIC, SNOWFLAKE_FACT_SCHEMA, SNOWFLAKE_DIM_SCHEMA, SNOWFLAKE_SCHEMA_REF
+from config import VALID_KPIS, CACHE_TTL_SECONDS, DEPARTMENT_KPIS, SNOWFLAKE_SCHEMA_PUBLIC, SNOWFLAKE_FACT_SCHEMA, SNOWFLAKE_DIM_SCHEMA, SNOWFLAKE_SCHEMA_REF, SNOWFLAKE_QUERY_TIMEOUT_SECONDS
 from database import get_last_error, set_last_error, is_snowflake_configured, get_missing_required_env_vars, get_required_env_vars, get_connection, fq_table
+from snowflake.connector import DictCursor
 from utils.cache import get_cache, set_cache
 from utils.helpers import parse_weeks_param, normalize_department_name, to_display_name
 
@@ -305,6 +307,65 @@ def snowflake_status():
         },
         "last_error": get_last_error()
     })
+
+@app.route("/api/snowflake/test/freq-globale")
+def snowflake_test_freq_globale():
+    """Test endpoint pour valider la connexion Snowflake et la table FREQ_GLOBAL_PER_DEPT"""
+    if not is_snowflake_configured():
+        return jsonify({
+            "success": False,
+            "error": "Snowflake non configuré",
+            "missing_env_vars": get_missing_required_env_vars()
+        }), 400
+    
+    try:
+        connection = get_connection("aura_snowflake_test")
+        
+        with connection.cursor(DictCursor) as cursor:
+            fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
+            
+            # Get row count
+            cursor.execute(f"SELECT COUNT(*) as row_count FROM {fact_table}", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            row_count_result = cursor.fetchone()
+            freq_globale_row_count = row_count_result.get("ROW_COUNT", 0) if row_count_result else 0
+            
+            # Get columns
+            cursor.execute(f"SELECT * FROM {fact_table} LIMIT 1", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            freq_globale_columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            
+            # Get sample
+            cursor.execute(f"SELECT * FROM {fact_table} LIMIT 5", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            freq_globale_sample = cursor.fetchall()
+            
+            # Get available tables in schema
+            cursor.execute(f"SHOW TABLES IN SCHEMA {fq_table(SNOWFLAKE_FACT_SCHEMA, '')}", timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            tables_result = cursor.fetchall()
+            available_tables = [t.get("name", "") for t in tables_result] if tables_result else []
+        
+        connection.close()
+        set_last_error(None)
+        
+        return jsonify({
+            "success": True,
+            "connection_details": {
+                "account": get_connection.__self__.__dict__.get("account", "N/A") if hasattr(get_connection, "__self__") else os.getenv("SNOWFLAKE_ACCOUNT", "N/A"),
+                "user": os.getenv("SNOWFLAKE_USER", "N/A"),
+                "database": os.getenv("SNOWFLAKE_DATABASE", "N/A"),
+                "schema": SNOWFLAKE_FACT_SCHEMA
+            },
+            "freq_globale_row_count": freq_globale_row_count,
+            "freq_globale_columns": freq_globale_columns,
+            "freq_globale_sample": freq_globale_sample,
+            "available_tables": available_tables
+        })
+    
+    except Exception as exc:
+        set_last_error(str(exc))
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "snowflake_error": get_last_error()
+        }), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
