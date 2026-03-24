@@ -34,12 +34,7 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
     fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
     dim_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_DEPARTEMENTS")
 
-    try:
-        connection = get_connection("aura_dashboard_backend")
-    except Exception as conn_err:
-        error_msg = f"Snowflake connection failed at startup: {str(conn_err)}"
-        set_last_error(error_msg)
-        return {}, "", []
+    connection = get_connection("aura_dashboard_backend")
 
     try:
         available_weeks = fetch_available_weeks_from_snowflake(connection)
@@ -135,11 +130,7 @@ def fetch_global_frequentation_from_snowflake(year=2024, selected_weeks=None):
     fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
     year = max(2024, int(year))
 
-    try:
-        connection = get_connection("aura_global_frequentation")
-    except Exception as conn_err:
-        set_last_error(f"Global frequentation connection failed: {str(conn_err)}")
-        return build_mock_global_frequentation(year, selected_weeks)
+    connection = get_connection("aura_global_frequentation")
 
     try:
         where_clause = f"WHERE WEEK IN ({', '.join([f'{w!r}' for w in selected_weeks])})" if selected_weeks else ""
@@ -300,11 +291,7 @@ def fetch_department_timeline_from_snowflake(canonical_name):
     countries_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_COUNTRIES")
     department_code = DEPARTMENT_TO_CODE.get(canonical_name)
 
-    try:
-        connection = get_connection("aura_department_timeline")
-    except Exception as conn_err:
-        set_last_error(f"Department timeline connection failed: {str(conn_err)}")
-        return build_mock_department_timeline(canonical_name)
+    connection = get_connection("aura_department_timeline")
 
     try:
         with connection.cursor(DictCursor) as cursor:
