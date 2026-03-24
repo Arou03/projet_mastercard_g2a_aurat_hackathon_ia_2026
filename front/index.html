@@ -99,6 +99,40 @@
             </div>
             <div id="globalMlLegend" class="timeline-legend"></div>
         </section>
+
+        <section class="holiday-panel">
+            <div class="holiday-panel-head">
+                <h3>Modele depenses internationales</h3>
+                <p id="expensesStatus">En attente</p>
+            </div>
+            <div class="expenses-controls">
+                <label>Pays
+                    <select id="expensesCountry" class="year-select">
+                        <option value="GBR">GBR</option>
+                        <option value="FRA">FRA</option>
+                        <option value="DEU">DEU</option>
+                        <option value="BEL">BEL</option>
+                        <option value="NLD">NLD</option>
+                        <option value="USA">USA</option>
+                        <option value="CAN">CAN</option>
+                        <option value="CHN">CHN</option>
+                    </select>
+                </label>
+                <label>Semaine
+                    <select id="expensesWeek" class="year-select"></select>
+                </label>
+                <label>Saison
+                    <input id="expensesSeason" class="year-select" type="text" value="H26">
+                </label>
+                <label>Objectif (€)
+                    <input id="expensesTarget" class="year-select" type="number" placeholder="Optionnel">
+                </label>
+                <button id="expensesPredictBtn" class="debug-toggle" type="button">Predire</button>
+            </div>
+            <canvas id="expensesCompareChart" class="dep-chart" width="1200" height="230"></canvas>
+            <canvas id="expensesTrendChart" class="dep-chart" width="1200" height="220"></canvas>
+            <div id="expensesFeatureList" class="timeline-legend"></div>
+        </section>
     </div>
 
 </div>

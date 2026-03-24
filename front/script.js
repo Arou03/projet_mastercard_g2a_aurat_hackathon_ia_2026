@@ -41,6 +41,7 @@ function initThemeToggle() {
         // Re-render canvases to apply the active theme palette.
         fetchGlobalHolidays();
         fetchGlobalMlTrend();
+        renderExpensesVisuals();
     });
 }
 
@@ -72,6 +73,15 @@ const globalHolidayStatus = document.getElementById("globalHolidayStatus");
 const globalMlCanvas = document.getElementById("globalMlTimeline");
 const globalMlStatus = document.getElementById("globalMlStatus");
 const globalMlLegend = document.getElementById("globalMlLegend");
+const expensesCountrySelect = document.getElementById("expensesCountry");
+const expensesWeekSelect = document.getElementById("expensesWeek");
+const expensesSeasonInput = document.getElementById("expensesSeason");
+const expensesTargetInput = document.getElementById("expensesTarget");
+const expensesPredictBtn = document.getElementById("expensesPredictBtn");
+const expensesStatus = document.getElementById("expensesStatus");
+const expensesCompareCanvas = document.getElementById("expensesCompareChart");
+const expensesTrendCanvas = document.getElementById("expensesTrendChart");
+const expensesFeatureList = document.getElementById("expensesFeatureList");
 const mlOptionsToggle = document.getElementById("mlOptionsToggle");
 const mlOptionsDrawer = document.getElementById("mlOptionsDrawer");
 const mlYearFilters = document.getElementById("mlYearFilters");
@@ -105,6 +115,7 @@ let globalHolidaySegments = [];
 let holidayTooltipEl = null;
 let selectedMlYears = [...ML_YEAR_CHOICES];
 let mlCustomParams = [];
+let lastExpensesResult = null;
 const clientResponseCache = new Map();
 const inFlightRequests = new Map();
 
@@ -485,6 +496,241 @@ function drawGlobalMlTrend(weeks, series) {
             .map((item, seriesIndex) => `<span class="legend-chip"><span class="legend-dot" style="background:${mlSeriesColor(seriesIndex, item.color)}"></span>${item.label || item.year}</span>`)
             .join("");
     }
+}
+
+function drawExpensesCompareChart(prediction, avgValue, targetValue) {
+    if (!expensesCompareCanvas) {
+        return;
+    }
+
+    const theme = getChartTheme();
+    const { ctx, width, height } = getCanvasSize(expensesCompareCanvas);
+    const pad = { top: 20, right: 20, bottom: 34, left: 56 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+    const bars = [
+        { label: "Prediction", value: prediction, color: "#7be8ff" },
+        { label: "Moyenne pays", value: avgValue, color: "#ffd37d" },
+        { label: "Objectif", value: targetValue, color: "#ff9ed3" },
+    ].filter(item => Number.isFinite(item.value));
+
+    const maxVal = bars.length ? Math.max(...bars.map(item => item.value), 1) : 1;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = theme.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + (chartH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    }
+
+    const slotW = chartW / Math.max(1, bars.length);
+    bars.forEach((bar, index) => {
+        const barW = Math.min(56, slotW * 0.55);
+        const x = pad.left + index * slotW + (slotW - barW) / 2;
+        const h = Math.max(2, (bar.value / maxVal) * chartH);
+        const y = pad.top + chartH - h;
+        ctx.fillStyle = bar.color;
+        ctx.fillRect(x, y, barW, h);
+        ctx.fillStyle = theme.text;
+        ctx.textAlign = "center";
+        ctx.font = "12px Luciole, Segoe UI, sans-serif";
+        ctx.fillText(bar.label, x + barW / 2, height - 10);
+    });
+
+    ctx.fillStyle = theme.text;
+    ctx.textAlign = "right";
+    ctx.fillText(formatNumber(0), pad.left - 8, pad.top + chartH + 4);
+    ctx.fillText(formatNumber(maxVal), pad.left - 8, pad.top + 4);
+}
+
+function drawExpensesTrendChart(lag2, lag1, rolling3, prediction) {
+    if (!expensesTrendCanvas) {
+        return;
+    }
+
+    const theme = getChartTheme();
+    const points = [lag2, lag1, rolling3, prediction].map(value => (Number.isFinite(value) ? value : null));
+    const labels = ["Lag-2", "Lag-1", "Roll3", "Pred"];
+    const values = points.filter(v => v !== null);
+    const minValue = values.length ? Math.min(...values) : 0;
+    const maxValue = values.length ? Math.max(...values) : 1;
+    const range = Math.max(1, maxValue - minValue);
+
+    const { ctx, width, height } = getCanvasSize(expensesTrendCanvas);
+    const pad = { top: 20, right: 20, bottom: 34, left: 56 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = theme.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + (chartH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    }
+
+    const xFromIndex = index => pad.left + (index / Math.max(1, labels.length - 1)) * chartW;
+    const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
+
+    ctx.strokeStyle = "#a7ff8b";
+    ctx.lineWidth = 2.2;
+    let started = false;
+    points.forEach((value, index) => {
+        if (value === null) {
+            return;
+        }
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        if (!started) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            started = true;
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    if (started) {
+        ctx.stroke();
+    }
+
+    points.forEach((value, index) => {
+        if (value === null) {
+            return;
+        }
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        ctx.beginPath();
+        ctx.fillStyle = "#7be8ff";
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.fillStyle = theme.text;
+    ctx.textAlign = "center";
+    ctx.font = "12px Luciole, Segoe UI, sans-serif";
+    labels.forEach((label, index) => {
+        ctx.fillText(label, xFromIndex(index), height - 10);
+    });
+}
+
+function renderExpensesVisuals() {
+    if (!lastExpensesResult) {
+        return;
+    }
+
+    const features = lastExpensesResult.features_used || {};
+    const prediction = Number(lastExpensesResult.prediction);
+    const avgValue = Number(features.PAYS_AVG_DEPENSES);
+    const targetValue = Number(expensesTargetInput && expensesTargetInput.value ? expensesTargetInput.value : NaN);
+    drawExpensesCompareChart(prediction, avgValue, targetValue);
+    drawExpensesTrendChart(
+        Number(features.LAG_2),
+        Number(features.LAG_1),
+        Number(features.ROLLING_MEAN_3),
+        prediction,
+    );
+
+    if (expensesFeatureList) {
+        const visibleKeys = [
+            "JOURS_ANTICIPATION",
+            "PAYS_AVG_DEPENSES",
+            "PAYS_STD_DEPENSES",
+            "HAS_HOLIDAY",
+            "LAG_1",
+            "LAG_2",
+            "ROLLING_MEAN_3",
+            "PCT_CHANGE",
+        ];
+        expensesFeatureList.innerHTML = visibleKeys
+            .map(key => `<span class="legend-chip"><span class="legend-dot" style="background:#7be8ff"></span>${key}: ${formatNumber(Number(features[key]))}</span>`)
+            .join("");
+    }
+}
+
+function fetchExpensesPrediction() {
+    if (!expensesCountrySelect || !expensesWeekSelect || !expensesStatus) {
+        return Promise.resolve();
+    }
+
+    const country = String(expensesCountrySelect.value || "").trim().toUpperCase();
+    const week = Number.parseInt(expensesWeekSelect.value, 10) || 1;
+    const season = String(expensesSeasonInput && expensesSeasonInput.value ? expensesSeasonInput.value : "").trim();
+
+    const query = new URLSearchParams({
+        country,
+        week: String(week),
+    });
+    if (season) {
+        query.set("season", season);
+    }
+
+    expensesStatus.textContent = "Chargement prediction...";
+    return fetchJsonCached(`${API_URL}/api/predict/expenses/context?${query.toString()}`, FETCH_TIMEOUT_MS, 8000)
+        .then(payload => {
+            if (!payload || !payload.success) {
+                throw new Error(payload?.error || "Prediction indisponible");
+            }
+            lastExpensesResult = payload;
+            expensesStatus.textContent = `Prediction: ${formatNumber(Number(payload.prediction))} € (${country} S${week})`;
+            renderExpensesVisuals();
+            appendDebugLine("/api/predict/expenses/context", {
+                country,
+                week,
+                season,
+                source: payload.data_source,
+            });
+        })
+        .catch(error => {
+            expensesStatus.textContent = "Erreur prediction depenses";
+            appendDebugLine("/api/predict/expenses/context error", { message: error?.message || "unknown" });
+        });
+}
+
+function initExpensesModelPanel() {
+    if (!expensesWeekSelect) {
+        return;
+    }
+
+    expensesWeekSelect.innerHTML = Array.from({ length: 52 }, (_, i) => i + 1)
+        .map(week => `<option value="${week}">S${week}</option>`)
+        .join("");
+
+    expensesWeekSelect.value = "3";
+
+    if (expensesPredictBtn) {
+        expensesPredictBtn.addEventListener("click", () => {
+            fetchExpensesPrediction();
+        });
+    }
+
+    if (expensesTargetInput) {
+        expensesTargetInput.addEventListener("change", () => {
+            renderExpensesVisuals();
+        });
+    }
+
+    [expensesCountrySelect, expensesWeekSelect, expensesSeasonInput].forEach(input => {
+        if (input) {
+            input.addEventListener("change", () => {
+                fetchExpensesPrediction();
+            });
+        }
+    });
+
+    fetchExpensesPrediction();
 }
 
 function fetchGlobalMlTrend() {
@@ -1369,6 +1615,7 @@ fetch("data/departements.geojson")
         initThemeToggle();
         initUiToggles();
         initMlOptions();
+        initExpensesModelPanel();
         initGlobalYearSelector();
         initPanelResize();
         checkSnowflakeStatus();
@@ -1385,4 +1632,5 @@ fetch("data/departements.geojson")
 window.addEventListener("resize", () => {
     fetchGlobalHolidays();
     fetchGlobalMlTrend();
+    renderExpensesVisuals();
 });
