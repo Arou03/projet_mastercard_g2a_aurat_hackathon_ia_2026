@@ -153,7 +153,16 @@ function formatDisplayDate(value) {
 }
 
 function holidayColor(seed) {
-    const palette = ["#d14247", "#1a7251", "#086cb2", "#90437d", "#d4a434", "#00a0df"];
+    const isLight = document.body.classList.contains("light-mode");
+    const palette = isLight
+        ? [
+            "#d14247", "#1a7251", "#086cb2", "#90437d", "#d4a434", "#00a0df",
+            "#f08c2e", "#4f8ef7", "#b84ad7", "#2ea6a6", "#c55a8a", "#7a9f2a",
+        ]
+        : [
+            "#ff8a8f", "#8effa9", "#80c4ff", "#d9a6ff", "#ffe082", "#7be8ff",
+            "#ffb47d", "#a3b8ff", "#ff9ed3", "#98f5e1", "#ffd3a3", "#b6f36a",
+        ];
     let hash = 0;
     const text = String(seed || "");
     for (let i = 0; i < text.length; i += 1) {
@@ -172,6 +181,7 @@ function getChartTheme() {
             text: "#162c4a",
             laneEven: "#eef5fb",
             laneOdd: "#e5eff8",
+            holidayAlpha: 0.35,
         };
     }
 
@@ -181,7 +191,23 @@ function getChartTheme() {
         text: "#eaf4ff",
         laneEven: "#1a3558",
         laneOdd: "#1f3f66",
+        holidayAlpha: 0.56,
     };
+}
+
+function mlSeriesColor(index, fallbackColor) {
+    const isLight = document.body.classList.contains("light-mode");
+    const darkPalette = [
+        "#7be8ff", "#ffd37d", "#a7ff8b", "#ff9ed3", "#b8b8ff", "#ffb47d", "#98f5e1", "#d9a6ff",
+    ];
+    const lightPalette = [
+        "#086cb2", "#d14247", "#1a7251", "#90437d", "#d4a434", "#00a0df", "#2ea6a6", "#b84ad7",
+    ];
+    const palette = isLight ? lightPalette : darkPalette;
+    if (fallbackColor && isLight) {
+        return fallbackColor;
+    }
+    return palette[index % palette.length];
 }
 
 function toWeekNumber(weekLabel) {
@@ -295,7 +321,7 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
         const widthRect = Math.max(3, x2 - x1);
         const heightRect = Math.max(12, laneHeight - 6);
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.35;
+        ctx.globalAlpha = theme.holidayAlpha;
         ctx.fillRect(x1, y, widthRect, heightRect);
         ctx.globalAlpha = 1;
 
@@ -403,10 +429,11 @@ function drawGlobalMlTrend(weeks, series) {
     };
     const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
 
-    (series || []).forEach(item => {
+    (series || []).forEach((item, seriesIndex) => {
         const values = item.values || [];
         const isSelected = Number(item.year) === Number(currentYear);
-        ctx.strokeStyle = item.color || "#086cb2";
+        const seriesColor = mlSeriesColor(seriesIndex, item.color);
+        ctx.strokeStyle = seriesColor;
         ctx.lineWidth = isSelected ? 2.8 : 1.8;
         ctx.beginPath();
         let started = false;
@@ -430,7 +457,7 @@ function drawGlobalMlTrend(weeks, series) {
             const x = xFromIndex(index);
             const y = yFromValue(value);
             ctx.beginPath();
-            ctx.fillStyle = item.color || "#086cb2";
+            ctx.fillStyle = seriesColor;
             ctx.arc(x, y, isSelected ? 4.2 : 3.2, 0, Math.PI * 2);
             ctx.fill();
         });
@@ -455,7 +482,7 @@ function drawGlobalMlTrend(weeks, series) {
 
     if (globalMlLegend) {
         globalMlLegend.innerHTML = (series || [])
-            .map(item => `<span class="legend-chip"><span class="legend-dot" style="background:${item.color || "#086cb2"}"></span>${item.label || item.year}</span>`)
+            .map((item, seriesIndex) => `<span class="legend-chip"><span class="legend-dot" style="background:${mlSeriesColor(seriesIndex, item.color)}"></span>${item.label || item.year}</span>`)
             .join("");
     }
 }
