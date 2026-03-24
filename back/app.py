@@ -127,6 +127,17 @@ def department_timeline(dep_name):
         set_last_error(str(exc))
         timeline = kpi_service.build_mock_department_timeline(canonical_name, year)
 
+    # Apply growth factor for prediction years
+    if year > 2024 and "frequentation" in timeline:
+        growth_factor = 1.0 + (0.05 * (year - 2024))
+        freq_data = timeline["frequentation"]
+        if freq_data.get("values_observed"):
+            freq_data["values_predicted"] = [
+                int(v * growth_factor) if v is not None else None 
+                for v in freq_data["values_observed"]
+            ]
+        freq_data["year"] = year
+
     payload = {
         "name": to_display_name(canonical_name), 
         "year": year, 

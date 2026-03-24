@@ -7,8 +7,9 @@ const title = document.getElementById("title");
 const timelineStatus = document.getElementById("timelineStatus");
 const timelineCanvas = document.getElementById("timelineChart");
 const holidayCanvas = document.getElementById("holidayTimeline");
+const frequentationCanvas = document.getElementById("frequentationChart");
+const frequentationStatus = document.getElementById("frequentationStatus");
 const timelineLegend = document.getElementById("timelineLegend");
-const holidayLegend = document.getElementById("holidayLegend");
 const errorBox = document.getElementById("departmentError");
 const yearSelector = document.getElementById("yearSelector");
 const yearInfo = document.getElementById("yearInfo");
@@ -262,11 +263,86 @@ function drawHolidayLanes(weeks, holidays, countries) {
         ctx.textAlign = "center";
         ctx.fillText(weeks[index], x, height - 8);
     });
+}
 
-    const holidayTypes = [...new Set(holidays.map(item => item.holiday_type).filter(Boolean))];
-    holidayLegend.innerHTML = holidayTypes.length
-        ? holidayTypes.map(type => `<span class="legend-chip">${type}</span>`).join("")
-        : "Aucune periode de vacances disponible";
+function drawFrequentationChart(weeks, valuesObserved, valuesPredicted, year) {
+    const { ctx, width, height } = getCanvasSize(frequentationCanvas);
+    const pad = { top: 20, right: 20, bottom: 36, left: 58 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+    
+    // Get values for current year
+    const currentValues = year === 2024 ? valuesObserved : valuesPredicted;
+    const allValues = currentValues.filter(v => typeof v === "number" && !Number.isNaN(v));
+    const minValue = allValues.length ? Math.min(...allValues) : 0;
+    const maxValue = allValues.length ? Math.max(...allValues) : 100;
+    const range = Math.max(1, maxValue - minValue);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#f8fbff";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "#d4dfe9";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + (chartH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    }
+
+    const xFromIndex = index => {
+        if (weeks.length <= 1) {
+            return pad.left;
+        }
+        return pad.left + (index / (weeks.length - 1)) * chartW;
+    };
+
+    const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
+
+    // Draw main frequency line
+    ctx.strokeStyle = "#086cb2";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([]);
+
+    let started = false;
+    currentValues.forEach((value, index) => {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return;
+        }
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        if (!started) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            started = true;
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    if (started) {
+        ctx.stroke();
+    }
+
+    // Draw axis labels
+    ctx.fillStyle = "#162c4a";
+    ctx.font = "12px Luciole, Segoe UI, sans-serif";
+    const tickIndexes = [0, Math.floor((weeks.length - 1) / 3), Math.floor(((weeks.length - 1) * 2) / 3), Math.max(0, weeks.length - 1)];
+    const seen = new Set();
+    tickIndexes.forEach(index => {
+        if (seen.has(index) || !weeks[index]) {
+            return;
+        }
+        seen.add(index);
+        const x = xFromIndex(index);
+        ctx.textAlign = "center";
+        ctx.fillText(weeks[index], x, height - 12);
+    });
+
+    ctx.textAlign = "right";
+    ctx.fillText(formatNumber(minValue), pad.left - 8, pad.top + chartH + 4);
+    ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
 }
 
 function renderError(message) {
@@ -280,6 +356,8 @@ function renderTimeline(payload) {
     const series = timeline.series || [];
     const holidays = timeline.holidays || [];
     const countries = timeline.countries || [];
+    const frequentation = timeline.frequentation || {};
+    const year = payload.year || 2024;
 
     if (!weeks.length || !series.length) {
         renderError("Aucune donnee temporelle disponible pour ce departement.");
@@ -288,7 +366,18 @@ function renderTimeline(payload) {
 
     drawTimelineChart(weeks, series);
     drawHolidayLanes(weeks, holidays, countries);
-}
+    
+    if (frequentation.weeks && (frequentation.values_observed || frequentation.values_predicted)) {
+        drawFrequentationChart(
+            frequentation.weeks,
+            frequentation.values_observed || [],
+            frequentation.values_predicted || [],
+            year
+        );
+        if (frequentationStatus) {
+            frequentationStatus.textContent = year === 2024 ? "Données observées" : `Prédiction (croissance 5% par an)`;
+        }
+    }
 
 function loadDepartmentData() {
     if (!dep) {

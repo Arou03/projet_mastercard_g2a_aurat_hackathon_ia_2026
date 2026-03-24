@@ -134,6 +134,12 @@ def build_mock_department_timeline(canonical_name, year=2024):
         ],
         "holidays": filter_winter_holidays(holidays),
         "countries": ["France"],
+        "frequentation": {
+            "weeks": weeks,
+            "values_observed": observed if year == 2024 else [None]*len(weeks),
+            "values_predicted": [None]*len(weeks) if year == 2024 else observed,
+            "year": year
+        }
     }
 
 def fetch_department_timeline_from_snowflake(canonical_name):
@@ -172,8 +178,9 @@ def fetch_department_timeline_from_snowflake(canonical_name):
         if country_name: countries.add(country_name)
         holidays.append({"country_code": str(read_ci(row, "code_pays") or "").strip(), "country_name": country_name, "season": str(read_ci(row, "saison") or "").strip(), "holiday_type": str(read_ci(row, "type_vacances") or "").strip(), "week_start": week_start, "week_end": week_end})
 
+    observed_values = [week_values[w]["total_aura"] for w in ordered_weeks]
     series = [
-        {"id": "observed", "label": "Frequentation observee", "values": [week_values[w]["total_aura"] for w in ordered_weeks], "color": "#086cb2"},
+        {"id": "observed", "label": "Frequentation observee", "values": observed_values, "color": "#086cb2"},
         {"id": "prediction", "label": "Prediction", "values": [None]*len(ordered_weeks), "color": "#d14247"},
         {"id": "rural", "label": "Feature rural", "values": [week_values[w]["rural"] for w in ordered_weeks], "color": "#1a7251"},
         {"id": "urbain", "label": "Feature urbain", "values": [week_values[w]["urbain"] for w in ordered_weeks], "color": "#90437d"},
@@ -181,4 +188,15 @@ def fetch_department_timeline_from_snowflake(canonical_name):
         {"id": "villages", "label": "Feature villages montagne", "values": [week_values[w]["villages_montagne"] for w in ordered_weeks], "color": "#00a0df"},
     ]
 
-    return {"weeks": ordered_weeks, "series": series, "holidays": holidays, "countries": sorted(list(countries))}
+    return {
+        "weeks": ordered_weeks,
+        "series": series,
+        "holidays": holidays,
+        "countries": sorted(list(countries)),
+        "frequentation": {
+            "weeks": ordered_weeks,
+            "values_observed": observed_values,
+            "values_predicted": [None]*len(ordered_weeks),
+            "year": 2024
+        }
+    }
