@@ -747,13 +747,9 @@ body.light-mode .holiday-tooltip {
     height: 280px;
 }
 
-#expensesCompareChart.dep-chart {
-    height: 190px;
-}
-
 .expenses-controls {
     display: grid;
-    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
     gap: 10px;
     align-items: end;
     margin-bottom: 10px;

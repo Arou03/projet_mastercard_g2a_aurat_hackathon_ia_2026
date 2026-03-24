@@ -83,10 +83,8 @@ const expensesStatus = document.getElementById("expensesStatus");
 const expensesCountrySelect = document.getElementById("expensesCountrySelect");
 const expensesSeasonInput = document.getElementById("expensesSeasonInput");
 const expensesWeekInput = document.getElementById("expensesWeekInput");
-const expensesObjectiveInput = document.getElementById("expensesObjectiveInput");
 const expensesApplyBtn = document.getElementById("expensesApplyBtn");
 const expensesTimelineChart = document.getElementById("expensesTimelineChart");
-const expensesCompareChart = document.getElementById("expensesCompareChart");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -590,58 +588,6 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
     });
 }
 
-function drawExpensesCompare(predictedValue, objectiveValue) {
-    if (!expensesCompareChart) {
-        return;
-    }
-
-    const { ctx, width, height } = getCanvasSize(expensesCompareChart);
-    const pad = { top: 20, right: 18, bottom: 24, left: 48 };
-    const theme = getChartTheme();
-
-    const prediction = typeof predictedValue === "number" && !Number.isNaN(predictedValue) ? predictedValue : 0;
-    const objective = typeof objectiveValue === "number" && !Number.isNaN(objectiveValue) ? objectiveValue : 0;
-    const maxValue = Math.max(1, prediction, objective);
-
-    const bars = [
-        { label: "Prediction", value: prediction, color: document.body.classList.contains("light-mode") ? "#086cb2" : "#7be8ff" },
-        { label: "Objectif", value: objective, color: document.body.classList.contains("light-mode") ? "#d14247" : "#ff9ed3" },
-    ];
-
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = theme.background;
-    ctx.fillRect(0, 0, width, height);
-
-    const chartW = width - pad.left - pad.right;
-    const barW = Math.min(180, chartW / 3.2);
-    const gap = Math.max(24, (chartW - barW * 2) / 3);
-    const baseY = height - pad.bottom;
-    const maxH = height - pad.top - pad.bottom;
-
-    bars.forEach((bar, index) => {
-        const x = pad.left + gap + index * (barW + gap);
-        const h = (bar.value / maxValue) * maxH;
-        const y = baseY - h;
-
-        ctx.fillStyle = bar.color;
-        ctx.globalAlpha = 0.88;
-        ctx.fillRect(x, y, barW, h);
-        ctx.globalAlpha = 1;
-
-        ctx.fillStyle = theme.text;
-        ctx.font = "12px Luciole, Segoe UI, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(bar.label, x + barW / 2, baseY + 14);
-        ctx.fillText(`${formatNumber(bar.value)} €`, x + barW / 2, y - 6);
-    });
-
-    ctx.strokeStyle = theme.grid;
-    ctx.beginPath();
-    ctx.moveTo(pad.left, baseY);
-    ctx.lineTo(width - pad.right, baseY);
-    ctx.stroke();
-}
-
 function resolveSelectedExpensesWeek() {
     if (!expensesWeekInput) {
         return 3;
@@ -653,17 +599,6 @@ function resolveSelectedExpensesWeek() {
     return Math.max(1, Math.min(52, value));
 }
 
-function resolveObjectiveValue() {
-    if (!expensesObjectiveInput) {
-        return 0;
-    }
-    const value = Number.parseFloat(expensesObjectiveInput.value);
-    if (Number.isNaN(value)) {
-        return 0;
-    }
-    return Math.max(0, value);
-}
-
 function refreshExpensesChartsFromState() {
     if (!latestExpensesSeries) {
         return;
@@ -671,20 +606,8 @@ function refreshExpensesChartsFromState() {
     const weeks = latestExpensesSeries.weeks || [];
     const predictions = latestExpensesSeries.predictions || [];
     const selectedWeek = resolveSelectedExpensesWeek();
-    const objective = resolveObjectiveValue();
-
-    let selectedPrediction = null;
-    (latestExpensesSeries.points || []).forEach(point => {
-        if (Number(point.week_of_year) === selectedWeek && typeof point.prediction === "number") {
-            selectedPrediction = point.prediction;
-        }
-    });
-    if (selectedPrediction === null && predictions.length) {
-        selectedPrediction = predictions[Math.min(predictions.length - 1, 0)];
-    }
 
     drawExpensesTimeline(weeks, predictions, selectedWeek);
-    drawExpensesCompare(selectedPrediction || 0, objective);
 }
 
 function fetchExpensesSeries() {
@@ -699,7 +622,6 @@ function fetchExpensesSeries() {
     }
 
     const season = String(expensesSeasonInput?.value || "").trim();
-    const week = resolveSelectedExpensesWeek();
     const query = new URLSearchParams({
         country,
         year: String(currentYear),
@@ -734,8 +656,7 @@ function fetchExpensesSeries() {
 
             refreshExpensesChartsFromState();
 
-            const objective = resolveObjectiveValue();
-            expensesStatus.textContent = `${country} - ${latestExpensesSeries.weeks.length} semaines (${sourceLabel(payload.data_source)}) - S${week} vs objectif ${formatNumber(objective)} €`;
+            expensesStatus.textContent = `${country} - ${latestExpensesSeries.weeks.length} semaines (${sourceLabel(payload.data_source)})`;
             appendDebugLine("/api/predict/expenses/series", {
                 country,
                 season,
@@ -746,8 +667,7 @@ function fetchExpensesSeries() {
         })
         .catch(error => {
             latestExpensesSeries = null;
-            drawExpensesTimeline([], [], week);
-            drawExpensesCompare(0, resolveObjectiveValue());
+            drawExpensesTimeline([], [], resolveSelectedExpensesWeek());
             expensesStatus.textContent = "Erreur chargement depenses";
             appendDebugLine("/api/predict/expenses/series error", { message: error?.message || "unknown" });
         });
@@ -805,12 +725,6 @@ function initExpensesPanel() {
         });
     }
 
-    if (expensesObjectiveInput) {
-        expensesObjectiveInput.addEventListener("input", () => {
-            refreshExpensesChartsFromState();
-        });
-    }
-
     fetchExpensesCountries();
 }
 
@@ -850,7 +764,7 @@ function fetchGlobalMlTrend() {
                 };
             });
             drawGlobalMlTrend(weeks, series);
-            globalMlStatus.textContent = `${series.length} courbe(s) - annee active ${currentYear} (${sourceLabel(payload.data_source)})`;
+            globalMlStatus.textContent = `${series.length} courbe(s) (${sourceLabel(payload.data_source)})`;
             appendDebugLine("/api/global/frequentation", {
                 source: payload.data_source,
                 weeks: weeks.length,
