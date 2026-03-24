@@ -3,3 +3,6 @@ flask-cors
 gunicorn
 snowflake-connector-python
 cryptography
+joblib
+scikit-learn
+numpy
