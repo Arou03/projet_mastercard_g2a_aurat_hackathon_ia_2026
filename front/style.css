@@ -453,6 +453,7 @@ body.light-mode .legend {
     margin: 10px 0;
     font-size: 13px;
     color: var(--text-main);
+    display: none;
 }
 
 .panel-title-row {
@@ -460,6 +461,7 @@ body.light-mode .legend {
     justify-content: space-between;
     align-items: center;
     gap: 10px;
+    padding-right: 68px;
 }
 
 .panel-title-row h2 {
@@ -886,5 +888,9 @@ label {
     .dep-panel-head {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .panel-title-row {
+        padding-right: 0;
     }
 }

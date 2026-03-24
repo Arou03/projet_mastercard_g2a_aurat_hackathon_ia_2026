@@ -37,6 +37,10 @@ function initThemeToggle() {
         const isLight = document.body.classList.contains("light-mode");
         localStorage.setItem("appTheme", isLight ? "light" : "dark");
         themeToggle.textContent = isLight ? "☀️" : "🌙";
+
+        // Re-render canvases to apply the active theme palette.
+        fetchGlobalHolidays();
+        fetchGlobalMlTrend();
     });
 }
 
@@ -159,6 +163,27 @@ function holidayColor(seed) {
     return palette[Math.abs(hash) % palette.length];
 }
 
+function getChartTheme() {
+    const isLight = document.body.classList.contains("light-mode");
+    if (isLight) {
+        return {
+            background: "#f8fbff",
+            grid: "#d4dfe9",
+            text: "#162c4a",
+            laneEven: "#eef5fb",
+            laneOdd: "#e5eff8",
+        };
+    }
+
+    return {
+        background: "#112845",
+        grid: "#36536f",
+        text: "#eaf4ff",
+        laneEven: "#1a3558",
+        laneOdd: "#1f3f66",
+    };
+}
+
 function toWeekNumber(weekLabel) {
     const text = String(weekLabel || "").toUpperCase().trim();
     if (text.startsWith("S") && /^\d+$/.test(text.slice(1))) {
@@ -202,8 +227,9 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
     const chartW = width - pad.left - pad.right;
     const chartH = height - pad.top - pad.bottom;
 
+    const theme = getChartTheme();
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#f8fbff";
+    ctx.fillStyle = theme.background;
     ctx.fillRect(0, 0, width, height);
 
     const orderedCountries = countries && countries.length ? countries : ["France"];
@@ -229,7 +255,13 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
         return pad.top + index * laneHeight + 2;
     };
 
-    ctx.strokeStyle = "#d4dfe9";
+    orderedCountries.forEach((_, index) => {
+        const y = pad.top + index * laneHeight;
+        ctx.fillStyle = index % 2 === 0 ? theme.laneEven : theme.laneOdd;
+        ctx.fillRect(pad.left, y, chartW, Math.max(2, laneHeight - 2));
+    });
+
+    ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
     for (let i = 0; i <= orderedCountries.length; i += 1) {
         const y = pad.top + i * laneHeight;
@@ -278,7 +310,7 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
         });
     });
 
-    ctx.fillStyle = "#162c4a";
+    ctx.fillStyle = theme.text;
     ctx.font = "12px Luciole, Segoe UI, sans-serif";
     orderedCountries.forEach((country, index) => {
         const y = pad.top + index * laneHeight + laneHeight / 2 + 4;
@@ -343,6 +375,7 @@ function drawGlobalMlTrend(weeks, series) {
     const chartW = width - pad.left - pad.right;
     const chartH = height - pad.top - pad.bottom;
 
+    const theme = getChartTheme();
     const validValues = (series || [])
         .flatMap(item => item.values || [])
         .filter(v => typeof v === "number" && !Number.isNaN(v));
@@ -351,10 +384,10 @@ function drawGlobalMlTrend(weeks, series) {
     const range = Math.max(1, maxValue - minValue);
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#f8fbff";
+    ctx.fillStyle = theme.background;
     ctx.fillRect(0, 0, width, height);
 
-    ctx.strokeStyle = "#d4dfe9";
+    ctx.strokeStyle = theme.grid;
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i += 1) {
         const y = pad.top + (chartH * i) / 4;
@@ -403,7 +436,7 @@ function drawGlobalMlTrend(weeks, series) {
         });
     });
 
-    ctx.fillStyle = "#162c4a";
+    ctx.fillStyle = theme.text;
     ctx.font = "12px Luciole, Segoe UI, sans-serif";
     ctx.textAlign = "center";
     const tickIndexes = [0, Math.floor((weeks.length - 1) / 3), Math.floor(((weeks.length - 1) * 2) / 3), Math.max(0, weeks.length - 1)];
@@ -693,6 +726,9 @@ function renderWeekFilters() {
 }
 
 function appendDebugLine(message, details) {
+    if (!debugConsole) {
+        return;
+    }
     const timestamp = new Date().toLocaleTimeString();
     const detailText = details ? ` ${JSON.stringify(details)}` : "";
     const line = `[${timestamp}] ${message}${detailText}\n`;
@@ -813,13 +849,17 @@ function initMlOptions() {
 }
 
 function initUiToggles() {
-    dataToggle.addEventListener("click", () => {
-        dataDrawer.classList.toggle("hidden");
-    });
+    if (dataToggle && dataDrawer) {
+        dataToggle.addEventListener("click", () => {
+            dataDrawer.classList.toggle("hidden");
+        });
+    }
 
-    debugToggle.addEventListener("click", () => {
-        debugConsole.classList.toggle("hidden");
-    });
+    if (debugToggle && debugConsole) {
+        debugToggle.addEventListener("click", () => {
+            debugConsole.classList.toggle("hidden");
+        });
+    }
 }
 
 function initGlobalYearSelector() {
