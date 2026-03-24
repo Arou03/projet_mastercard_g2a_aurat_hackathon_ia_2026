@@ -31,14 +31,15 @@ def data():
     try:
         selected_kpi = request.args.get("kpi", "total_aura").lower().strip()
         selected_weeks = parse_weeks_param(request.args.get("weeks", ""))
+        selected_year = max(2024, int(request.args.get("year", "2024").strip() if request.args.get("year", "2024").isdigit() else 2024))
         
         if selected_kpi not in VALID_KPIS:
             return jsonify({"error": "Invalid KPI", "valid_kpis": sorted(VALID_KPIS)}), 400
 
-        dataset, dataset_hit, data_source, available_weeks = kpi_service.get_department_dataset(selected_weeks)
+        dataset, dataset_hit, data_source, available_weeks = kpi_service.get_department_dataset(selected_weeks, selected_year)
         
         weeks_key = ",".join(selected_weeks) if selected_weeks else "ALL"
-        cache_key = f"api_data:{selected_kpi}:{weeks_key}"
+        cache_key = f"api_data:{selected_kpi}:{selected_year}:{weeks_key}"
         cached_payload, payload_hit = get_cache(cache_key)
 
         if payload_hit:
@@ -50,6 +51,7 @@ def data():
             
             payload = {
                 "selected_kpi": selected_kpi, 
+                "selected_year": selected_year,
                 "kpis": sorted(VALID_KPIS), 
                 "weeks_selected": selected_weeks, 
                 "weeks_available": available_weeks, 

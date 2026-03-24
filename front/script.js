@@ -63,6 +63,8 @@ const selectAllActivitiesCheckbox = document.getElementById("selectAllActivities
 const globalYearSelector = document.getElementById("globalYearSelector");
 const globalHolidayCanvas = document.getElementById("globalHolidayTimeline");
 const globalHolidayStatus = document.getElementById("globalHolidayStatus");
+const globalMlCanvas = document.getElementById("globalMlTimeline");
+const globalMlStatus = document.getElementById("globalMlStatus");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -90,6 +92,7 @@ let holidayTooltipEl = null;
 
 function sourceLabel(source) {
     if (source === "snowflake") return "Snowflake";
+    if (source === "ml_prediction") return "Prediction ML";
     if (source === "cache") return "Cache backend";
     if (source === "mock") return "Donnees mock";
     return "Inconnue";
@@ -314,6 +317,120 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
         globalHolidayCanvas.style.cursor = "default";
         hideHolidayTooltip();
     };
+}
+
+function drawGlobalMlTrend(years, totals) {
+    if (!globalMlCanvas) {
+        return;
+    }
+
+    const { ctx, width, height } = getCanvasSize(globalMlCanvas);
+    const pad = { top: 20, right: 20, bottom: 36, left: 66 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+
+    const values = totals.filter(v => typeof v === "number" && !Number.isNaN(v));
+    const minValue = values.length ? Math.min(...values) : 0;
+    const maxValue = values.length ? Math.max(...values) : 100;
+    const range = Math.max(1, maxValue - minValue);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#f8fbff";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "#d4dfe9";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + (chartH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    }
+
+    const xFromIndex = index => {
+        if (years.length <= 1) return pad.left;
+        return pad.left + (index / (years.length - 1)) * chartW;
+    };
+    const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
+
+    ctx.strokeStyle = "#086cb2";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    totals.forEach((value, index) => {
+        if (typeof value !== "number" || Number.isNaN(value)) return;
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    totals.forEach((value, index) => {
+        if (typeof value !== "number" || Number.isNaN(value)) return;
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        const isSelected = Number(years[index]) === Number(currentYear);
+        ctx.beginPath();
+        ctx.fillStyle = isSelected ? "#d14247" : "#086cb2";
+        ctx.arc(x, y, isSelected ? 5 : 4, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.fillStyle = "#162c4a";
+    ctx.font = "12px Luciole, Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    years.forEach((year, index) => {
+        ctx.fillText(String(year), xFromIndex(index), height - 10);
+    });
+
+    ctx.textAlign = "right";
+    ctx.fillText(formatNumber(minValue), pad.left - 8, pad.top + chartH + 4);
+    ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
+}
+
+function fetchGlobalMlTrend() {
+    if (!globalMlCanvas || !globalMlStatus) {
+        return Promise.resolve();
+    }
+
+    globalMlStatus.textContent = "Chargement...";
+    const years = [2024, 2025, 2026, 2027];
+
+    const requests = years.map(year => {
+        const query = new URLSearchParams({
+            kpi: "total_aura",
+            year: String(year),
+        });
+        if (selectedWeeks.length > 0) {
+            query.set("weeks", selectedWeeks.join(","));
+        }
+        return fetchWithTimeout(`${API_URL}/api/data?${query.toString()}`)
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`API data failed: ${res.status}`);
+                }
+                return res.json();
+            })
+            .then(payload => {
+                const total = (payload.departments || []).reduce((sum, dep) => sum + (Number(dep.score) || 0), 0);
+                return { year, total, source: payload.data_source || "inconnue" };
+            });
+    });
+
+    return Promise.all(requests)
+        .then(results => {
+            const sorted = [...results].sort((a, b) => a.year - b.year);
+            const yearsData = sorted.map(item => item.year);
+            const totalsData = sorted.map(item => item.total);
+            drawGlobalMlTrend(yearsData, totalsData);
+            globalMlStatus.textContent = `Serie 2024-2027 (${sourceLabel(sorted[0]?.source)})`;
+            appendDebugLine("/api/data ML trend", sorted);
+        })
+        .catch(error => {
+            globalMlStatus.textContent = "Erreur chargement graphique ML";
+            appendDebugLine("/api/data ML trend error", { message: error?.message || "unknown" });
+        });
 }
 
 function fetchGlobalHolidays() {
@@ -942,6 +1059,7 @@ function fetchKpiData() {
                 appendDebugLine("snowflake_error", { message: payload.snowflake_error });
             }
             checkSnowflakeStatus();
+            fetchGlobalMlTrend();
         })
         .catch(error => {
             if (error && error.name === "AbortError") {
