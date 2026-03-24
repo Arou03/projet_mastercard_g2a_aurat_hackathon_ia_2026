@@ -660,6 +660,47 @@ function renderExpensesVisuals() {
     }
 }
 
+function inferMonthFromWeek(week) {
+    const safeWeek = Math.min(Math.max(Number(week) || 1, 1), 52);
+    return Math.min(12, Math.max(1, Math.floor((safeWeek - 1) / 4.345) + 1));
+}
+
+function buildExpensesFallbackFeatures(countryCode, weekOfYear, season) {
+    const baselines = {
+        GBR: { avg: 980, std: 210 },
+        FRA: { avg: 760, std: 180 },
+        ESP: { avg: 690, std: 170 },
+        DEU: { avg: 910, std: 220 },
+        ITA: { avg: 720, std: 175 },
+        USA: { avg: 1240, std: 260 },
+    };
+
+    const baseline = baselines[countryCode] || { avg: 820, std: 190 };
+    const week = Math.min(Math.max(Number(weekOfYear) || 1, 1), 52);
+    const month = inferMonthFromWeek(week);
+    const seasonCode = String(season || "").toUpperCase();
+    const hasHoliday = /(HOLIDAY|VAC|SUMMER|XMAS|NOEL|H\d)/.test(seasonCode) ? 1 : 0;
+    const anticipation = hasHoliday ? 28 : 18;
+
+    const lag1 = baseline.avg * 0.95;
+    const lag2 = baseline.avg * 0.91;
+    const rolling = (lag1 + lag2 + baseline.avg) / 3;
+    const pctChange = lag2 !== 0 ? ((lag1 - lag2) / lag2) * 100 : 0;
+
+    return {
+        WEEK_OF_YEAR: week,
+        MONTH: month,
+        JOURS_ANTICIPATION: anticipation,
+        PAYS_AVG_DEPENSES: baseline.avg,
+        PAYS_STD_DEPENSES: baseline.std,
+        HAS_HOLIDAY: hasHoliday,
+        LAG_1: lag1,
+        LAG_2: lag2,
+        ROLLING_MEAN_3: rolling,
+        PCT_CHANGE: pctChange,
+    };
+}
+
 function fetchExpensesPrediction() {
     if (!expensesCountrySelect || !expensesWeekSelect || !expensesStatus) {
         return Promise.resolve();
@@ -678,13 +719,41 @@ function fetchExpensesPrediction() {
     }
 
     expensesStatus.textContent = "Chargement prediction...";
+
     return fetchJsonCached(`${API_URL}/api/predict/expenses/context?${query.toString()}`, FETCH_TIMEOUT_MS, 8000)
+        .catch(async error => {
+            const message = String(error?.message || "");
+            const isMissingContextRoute = message.includes("HTTP 404");
+            if (!isMissingContextRoute) {
+                throw error;
+            }
+
+            const fallbackFeatures = buildExpensesFallbackFeatures(country, week, season);
+            const fallbackPayload = await fetchJsonRequestWithRetry(
+                `${API_URL}/api/predict/expenses`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(fallbackFeatures),
+                },
+                FETCH_TIMEOUT_MS,
+                1,
+            );
+
+            return {
+                success: Boolean(fallbackPayload?.success),
+                prediction: fallbackPayload?.prediction,
+                features_used: fallbackFeatures,
+                data_source: "fallback-predict-expenses",
+            };
+        })
         .then(payload => {
             if (!payload || !payload.success) {
                 throw new Error(payload?.error || "Prediction indisponible");
             }
             lastExpensesResult = payload;
-            expensesStatus.textContent = `Prediction: ${formatNumber(Number(payload.prediction))} € (${country} S${week})`;
+            const source = payload.data_source === "fallback-predict-expenses" ? "mode compat" : "context";
+            expensesStatus.textContent = `Prediction: ${formatNumber(Number(payload.prediction))} € (${country} S${week}, ${source})`;
             renderExpensesVisuals();
             appendDebugLine("/api/predict/expenses/context", {
                 country,
@@ -811,11 +880,11 @@ function fetchGlobalHolidays() {
         });
 }
 
-async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        return await fetch(url, { signal: controller.signal });
+        return await fetch(url, { ...options, signal: controller.signal });
     } finally {
         clearTimeout(timeoutId);
     }
@@ -825,12 +894,12 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function fetchJsonWithRetry(url, timeoutMs = FETCH_TIMEOUT_MS, maxRetries = 2) {
+async function fetchJsonRequestWithRetry(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS, maxRetries = 2) {
     let lastError = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         try {
-            const response = await fetchWithTimeout(url, timeoutMs);
+            const response = await fetchWithTimeout(url, timeoutMs, options);
             if (!response.ok) {
                 const isTransient = [502, 503, 504].includes(response.status);
                 if (isTransient && attempt < maxRetries) {
@@ -850,6 +919,10 @@ async function fetchJsonWithRetry(url, timeoutMs = FETCH_TIMEOUT_MS, maxRetries 
     }
 
     throw lastError || new Error("Unknown network error");
+}
+
+async function fetchJsonWithRetry(url, timeoutMs = FETCH_TIMEOUT_MS, maxRetries = 2) {
+    return fetchJsonRequestWithRetry(url, {}, timeoutMs, maxRetries);
 }
 
 function fetchJsonCached(url, timeoutMs = FETCH_TIMEOUT_MS, ttlMs = CLIENT_CACHE_TTL_MS) {
