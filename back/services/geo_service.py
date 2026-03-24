@@ -6,7 +6,11 @@ from utils.helpers import read_ci, extract_activities_from_array
 
 def fetch_stations_from_snowflake():
     ref_table = fq_table(SNOWFLAKE_SCHEMA_REF, "REF_STATIONS")
-    connection = get_connection("aura_dashboard_stations")
+    try:
+        connection = get_connection("aura_dashboard_stations")
+    except Exception as conn_err:
+        set_last_error(f"Stations connection failed: {str(conn_err)}")
+        return [], []
     
     try:
         with connection.cursor(DictCursor) as cursor:

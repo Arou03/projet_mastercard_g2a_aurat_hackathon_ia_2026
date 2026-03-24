@@ -158,7 +158,13 @@ def fetch_expenses_features(country_code, week_of_year, season=None, month=None)
         fq_table("PUBLIC", "ML_EXPENSES_FEATURES"),
     ]
 
-    connection = get_connection("aura_expenses_features")
+    try:
+        connection = get_connection("aura_expenses_features")
+    except Exception as conn_err:
+        from database import set_last_error
+        set_last_error(f"Expenses features connection failed: {str(conn_err)}")
+        raise LookupError(f"Snowflake unavailable: {str(conn_err)}")
+
     try:
         with connection.cursor(DictCursor) as cursor:
             for table_name in tables_to_try:

@@ -27,7 +27,13 @@ def fetch_global_holidays_from_snowflake(year):
     countries_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_COUNTRIES")
     season_code = f"H{str(int(year))[-2:]}".upper()
 
-    connection = get_connection("aura_global_holidays")
+    try:
+        connection = get_connection("aura_global_holidays")
+    except Exception as conn_err:
+        from database import set_last_error
+        set_last_error(f"Holidays connection failed: {str(conn_err)}")
+        return build_mock_global_holidays(year)
+
     try:
         with connection.cursor(DictCursor) as cursor:
             query = f"SELECT h.CODE_PAYS AS code_pays, COALESCE(c.NOM, h.CODE_PAYS) AS country_name, h.DEBUT AS debut, h.FIN AS fin, h.SAISON AS saison, h.TYPE_VACANCES AS type_vacances FROM {holidays_table} h LEFT JOIN {countries_table} c ON c.CODE_PAYS = h.CODE_PAYS WHERE h.DEBUT IS NOT NULL AND h.FIN IS NOT NULL AND UPPER(h.SAISON) = %s"
