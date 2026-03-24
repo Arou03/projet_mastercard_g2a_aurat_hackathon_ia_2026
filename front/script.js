@@ -2,7 +2,7 @@
 // API CONFIG
 // =========================
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 30000;
 const CLIENT_CACHE_TTL_MS = 12000;
 const ML_YEAR_CHOICES = [2024, 2025, 2026, 2027];
 const KPI_LABELS = {

@@ -1,5 +1,5 @@
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
-const FETCH_TIMEOUT_MS = 15000;
+const FETCH_TIMEOUT_MS = 30000;
 
 const resultsContainer = document.getElementById("resultsContainer");
 const statusBadge = document.getElementById("statusBadge");
