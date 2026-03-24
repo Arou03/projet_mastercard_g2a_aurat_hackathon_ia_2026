@@ -35,7 +35,6 @@ def fetch_dataset_from_snowflake(selected_weeks=None):
     dim_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_DEPARTEMENTS")
 
     connection = get_connection("aura_dashboard_backend")
-
     try:
         available_weeks = fetch_available_weeks_from_snowflake(connection)
         where_clause = f"WHERE WEEK IN ({', '.join([f'{w!r}' for w in selected_weeks])})" if selected_weeks else ""
@@ -131,7 +130,6 @@ def fetch_global_frequentation_from_snowflake(year=2024, selected_weeks=None):
     year = max(2024, int(year))
 
     connection = get_connection("aura_global_frequentation")
-
     try:
         where_clause = f"WHERE WEEK IN ({', '.join([f'{w!r}' for w in selected_weeks])})" if selected_weeks else ""
         query = (
@@ -292,7 +290,6 @@ def fetch_department_timeline_from_snowflake(canonical_name):
     department_code = DEPARTMENT_TO_CODE.get(canonical_name)
 
     connection = get_connection("aura_department_timeline")
-
     try:
         with connection.cursor(DictCursor) as cursor:
             if department_code:

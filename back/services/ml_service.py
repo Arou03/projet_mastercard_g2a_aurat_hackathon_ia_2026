@@ -159,7 +159,6 @@ def fetch_expenses_features(country_code, week_of_year, season=None, month=None)
     ]
 
     connection = get_connection("aura_expenses_features")
-
     try:
         with connection.cursor(DictCursor) as cursor:
             for table_name in tables_to_try:
