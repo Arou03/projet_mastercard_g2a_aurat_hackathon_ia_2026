@@ -1,4 +1,8 @@
-const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const REMOTE_API_FALLBACK = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const API_URL = (
+    localStorage.getItem("apiBaseUrl")
+    || ((window.location.hostname || "").includes("onrender.com") ? window.location.origin : REMOTE_API_FALLBACK)
+).replace(/\/$/, "");
 const FETCH_TIMEOUT_MS = 30000;
 
 const resultsContainer = document.getElementById("resultsContainer");

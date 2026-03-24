@@ -1,7 +1,11 @@
 // =========================
 // API CONFIG
 // =========================
-const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const REMOTE_API_FALLBACK = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
+const API_URL = (
+    localStorage.getItem("apiBaseUrl")
+    || ((window.location.hostname || "").includes("onrender.com") ? window.location.origin : REMOTE_API_FALLBACK)
+).replace(/\/$/, "");
 const FETCH_TIMEOUT_MS = 30000;
 const CLIENT_CACHE_TTL_MS = 12000;
 const ML_YEAR_CHOICES = [2024, 2025, 2026, 2027];
