@@ -62,7 +62,6 @@ const stationActivityFiltersContainer = document.getElementById("stationActivity
 const selectAllActivitiesCheckbox = document.getElementById("selectAllActivities");
 const globalYearSelector = document.getElementById("globalYearSelector");
 const globalHolidayCanvas = document.getElementById("globalHolidayTimeline");
-const globalHolidayLegend = document.getElementById("globalHolidayLegend");
 const globalHolidayStatus = document.getElementById("globalHolidayStatus");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
@@ -177,7 +176,7 @@ function getCanvasSize(canvas) {
 }
 
 function drawGlobalHolidayLanes(weeks, holidays, countries) {
-    if (!globalHolidayCanvas || !globalHolidayLegend) {
+    if (!globalHolidayCanvas) {
         return;
     }
 
@@ -282,15 +281,7 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
         ctx.fillText(weeks[index], x, height - 8);
     });
 
-    const holidayTypes = [...new Set(holidays.map(item => item.holiday_type).filter(Boolean))];
-    globalHolidayLegend.innerHTML = holidayTypes.length
-        ? holidayTypes
-            .map(type => {
-                const color = holidayColor(type);
-                return `<span class="legend-chip"><span class="legend-dot" style="background:${color}"></span>${type}</span>`;
-            })
-            .join("")
-        : "Aucune periode de vacances disponible";
+
 
     const tooltip = ensureHolidayTooltip();
     globalHolidayCanvas.onmousemove = event => {
@@ -355,9 +346,6 @@ function fetchGlobalHolidays() {
         })
         .catch(error => {
             globalHolidayStatus.textContent = "Erreur chargement vacances";
-            if (globalHolidayLegend) {
-                globalHolidayLegend.textContent = "Impossible de recuperer le calendrier des vacances.";
-            }
             appendDebugLine("/api/global/holidays error", { message: error?.message || "unknown" });
         });
 }

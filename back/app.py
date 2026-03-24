@@ -348,7 +348,7 @@ def snowflake_test_freq_globale():
         return jsonify({
             "success": True,
             "connection_details": {
-                "account": get_connection.__self__.__dict__.get("account", "N/A") if hasattr(get_connection, "__self__") else os.getenv("SNOWFLAKE_ACCOUNT", "N/A"),
+                "account": os.getenv("SNOWFLAKE_ACCOUNT", "N/A"),
                 "user": os.getenv("SNOWFLAKE_USER", "N/A"),
                 "database": os.getenv("SNOWFLAKE_DATABASE", "N/A"),
                 "schema": SNOWFLAKE_FACT_SCHEMA
