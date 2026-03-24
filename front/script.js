@@ -3,6 +3,8 @@
 // =========================
 const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
 const FETCH_TIMEOUT_MS = 15000;
+const CLIENT_CACHE_TTL_MS = 12000;
+const ML_YEAR_CHOICES = [2024, 2025, 2026, 2027];
 const KPI_LABELS = {
     total_aura: "Total AURA",
     rural: "Rural",
@@ -65,6 +67,14 @@ const globalHolidayCanvas = document.getElementById("globalHolidayTimeline");
 const globalHolidayStatus = document.getElementById("globalHolidayStatus");
 const globalMlCanvas = document.getElementById("globalMlTimeline");
 const globalMlStatus = document.getElementById("globalMlStatus");
+const globalMlLegend = document.getElementById("globalMlLegend");
+const mlOptionsToggle = document.getElementById("mlOptionsToggle");
+const mlOptionsDrawer = document.getElementById("mlOptionsDrawer");
+const mlYearFilters = document.getElementById("mlYearFilters");
+const mlSelectAllYears = document.getElementById("mlSelectAllYears");
+const mlParamList = document.getElementById("mlParamList");
+const mlAddParamBtn = document.getElementById("mlAddParamBtn");
+const mlApplyOptionsBtn = document.getElementById("mlApplyOptionsBtn");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -89,6 +99,10 @@ let selectedStationActivities = [];
 let stationsLayer = null;
 let globalHolidaySegments = [];
 let holidayTooltipEl = null;
+let selectedMlYears = [...ML_YEAR_CHOICES];
+let mlCustomParams = [];
+const clientResponseCache = new Map();
+const inFlightRequests = new Map();
 
 function sourceLabel(source) {
     if (source === "snowflake") return "Snowflake";
@@ -319,7 +333,7 @@ function drawGlobalHolidayLanes(weeks, holidays, countries) {
     };
 }
 
-function drawGlobalMlTrend(weeks, values) {
+function drawGlobalMlTrend(weeks, series) {
     if (!globalMlCanvas) {
         return;
     }
@@ -329,7 +343,9 @@ function drawGlobalMlTrend(weeks, values) {
     const chartW = width - pad.left - pad.right;
     const chartH = height - pad.top - pad.bottom;
 
-    const validValues = values.filter(v => typeof v === "number" && !Number.isNaN(v));
+    const validValues = (series || [])
+        .flatMap(item => item.values || [])
+        .filter(v => typeof v === "number" && !Number.isNaN(v));
     const minValue = validValues.length ? Math.min(...validValues) : 0;
     const maxValue = validValues.length ? Math.max(...validValues) : 100;
     const range = Math.max(1, maxValue - minValue);
@@ -354,33 +370,37 @@ function drawGlobalMlTrend(weeks, values) {
     };
     const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
 
-    ctx.strokeStyle = "#086cb2";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    let started = false;
-    values.forEach((value, index) => {
-        if (typeof value !== "number" || Number.isNaN(value)) return;
-        const x = xFromIndex(index);
-        const y = yFromValue(value);
-        if (!started) {
-            ctx.moveTo(x, y);
-            started = true;
-        } else {
-            ctx.lineTo(x, y);
-        }
-    });
-    if (started) {
-        ctx.stroke();
-    }
-
-    values.forEach((value, index) => {
-        if (typeof value !== "number" || Number.isNaN(value)) return;
-        const x = xFromIndex(index);
-        const y = yFromValue(value);
+    (series || []).forEach(item => {
+        const values = item.values || [];
+        const isSelected = Number(item.year) === Number(currentYear);
+        ctx.strokeStyle = item.color || "#086cb2";
+        ctx.lineWidth = isSelected ? 2.8 : 1.8;
         ctx.beginPath();
-        ctx.fillStyle = "#086cb2";
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        let started = false;
+        values.forEach((value, index) => {
+            if (typeof value !== "number" || Number.isNaN(value)) return;
+            const x = xFromIndex(index);
+            const y = yFromValue(value);
+            if (!started) {
+                ctx.moveTo(x, y);
+                started = true;
+            } else {
+                ctx.lineTo(x, y);
+            }
+        });
+        if (started) {
+            ctx.stroke();
+        }
+
+        values.forEach((value, index) => {
+            if (typeof value !== "number" || Number.isNaN(value)) return;
+            const x = xFromIndex(index);
+            const y = yFromValue(value);
+            ctx.beginPath();
+            ctx.fillStyle = item.color || "#086cb2";
+            ctx.arc(x, y, isSelected ? 4.2 : 3.2, 0, Math.PI * 2);
+            ctx.fill();
+        });
     });
 
     ctx.fillStyle = "#162c4a";
@@ -399,6 +419,12 @@ function drawGlobalMlTrend(weeks, values) {
     ctx.textAlign = "right";
     ctx.fillText(formatNumber(minValue), pad.left - 8, pad.top + chartH + 4);
     ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
+
+    if (globalMlLegend) {
+        globalMlLegend.innerHTML = (series || [])
+            .map(item => `<span class="legend-chip"><span class="legend-dot" style="background:${item.color || "#086cb2"}"></span>${item.label || item.year}</span>`)
+            .join("");
+    }
 }
 
 function fetchGlobalMlTrend() {
@@ -407,28 +433,42 @@ function fetchGlobalMlTrend() {
     }
 
     globalMlStatus.textContent = "Chargement...";
-    const query = new URLSearchParams({ year: String(currentYear) });
+    const years = selectedMlYears.length ? [...selectedMlYears] : [currentYear];
+    const query = new URLSearchParams({
+        year: String(currentYear),
+        years: years.join(","),
+    });
     if (selectedWeeks.length > 0) {
         query.set("weeks", selectedWeeks.join(","));
     }
 
-    return fetchWithTimeout(`${API_URL}/api/global/frequentation?${query.toString()}`)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`API frequentation failed: ${res.status}`);
-            }
-            return res.json();
-        })
+    mlCustomParams.forEach(item => {
+        const key = String(item.key || "").trim();
+        const value = String(item.value || "").trim();
+        if (!key || !value) {
+            return;
+        }
+        query.set(`ml_param_${key}`, value);
+    });
+
+    return fetchJsonCached(`${API_URL}/api/global/frequentation?${query.toString()}`)
         .then(payload => {
             const weeks = normalizeWeeksOrder(payload.weeks || []);
-            const valuesByWeek = new Map((payload.weeks || []).map((week, index) => [String(week).toUpperCase(), payload.values?.[index]]));
-            const values = weeks.map(week => valuesByWeek.get(week));
-            drawGlobalMlTrend(weeks, values);
-            globalMlStatus.textContent = `Annee ${currentYear} (${sourceLabel(payload.data_source)})`;
+            const baseWeeks = payload.weeks || [];
+            const series = (payload.series || []).map(item => {
+                const valuesByWeek = new Map(baseWeeks.map((week, index) => [String(week).toUpperCase(), item.values?.[index]]));
+                return {
+                    ...item,
+                    values: weeks.map(week => valuesByWeek.get(week)),
+                };
+            });
+            drawGlobalMlTrend(weeks, series);
+            globalMlStatus.textContent = `${series.length} courbe(s) - annee active ${currentYear} (${sourceLabel(payload.data_source)})`;
             appendDebugLine("/api/global/frequentation", {
                 source: payload.data_source,
                 weeks: weeks.length,
-                year: currentYear,
+                years,
+                params: mlCustomParams,
             });
         })
         .catch(error => {
@@ -445,13 +485,7 @@ function fetchGlobalHolidays() {
     globalHolidayStatus.textContent = "Chargement...";
     const query = new URLSearchParams({ year: String(currentYear) });
 
-    return fetchWithTimeout(`${API_URL}/api/global/holidays?${query.toString()}`)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`API holidays failed: ${res.status}`);
-            }
-            return res.json();
-        })
+    return fetchJsonCached(`${API_URL}/api/global/holidays?${query.toString()}`)
         .then(payload => {
             const weeks = normalizeWeeksOrder(payload.weeks || []);
             const holidays = payload.holidays || [];
@@ -479,6 +513,37 @@ async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+function fetchJsonCached(url, timeoutMs = FETCH_TIMEOUT_MS, ttlMs = CLIENT_CACHE_TTL_MS) {
+    const now = Date.now();
+    const cached = clientResponseCache.get(url);
+    if (cached && cached.expiresAt > now) {
+        return Promise.resolve(cached.data);
+    }
+
+    const existing = inFlightRequests.get(url);
+    if (existing) {
+        return existing;
+    }
+
+    const promise = fetchWithTimeout(url, timeoutMs)
+        .then(res => {
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            return res.json();
+        })
+        .then(data => {
+            clientResponseCache.set(url, { data, expiresAt: Date.now() + ttlMs });
+            return data;
+        })
+        .finally(() => {
+            inFlightRequests.delete(url);
+        });
+
+    inFlightRequests.set(url, promise);
+    return promise;
 }
 
 function weekSortKey(week) {
@@ -635,6 +700,118 @@ function appendDebugLine(message, details) {
     debugConsole.scrollTop = debugConsole.scrollHeight;
 }
 
+function renderMlParamRows() {
+    if (!mlParamList) {
+        return;
+    }
+
+    if (!mlCustomParams.length) {
+        mlParamList.innerHTML = '<div class="drawer-title">Aucun parametre personnalise</div>';
+        return;
+    }
+
+    mlParamList.innerHTML = mlCustomParams
+        .map((item, index) => `
+            <div class="ml-param-row" data-index="${index}">
+                <input type="text" class="ml-param-key" value="${item.key || ""}" placeholder="nom_parametre">
+                <input type="number" class="ml-param-value" value="${item.value || ""}" step="0.01" placeholder="valeur">
+                <button type="button" class="ml-param-remove" title="Supprimer">×</button>
+            </div>
+        `)
+        .join("");
+}
+
+function renderMlYearFilters() {
+    if (!mlYearFilters) {
+        return;
+    }
+
+    const selectedSet = new Set(selectedMlYears);
+    mlYearFilters.innerHTML = ML_YEAR_CHOICES
+        .map(year => {
+            const checked = selectedSet.has(year) ? "checked" : "";
+            return `<label><input type="checkbox" class="ml-year-filter" value="${year}" ${checked}> ${year}</label>`;
+        })
+        .join("");
+
+    if (mlSelectAllYears) {
+        mlSelectAllYears.checked = ML_YEAR_CHOICES.every(year => selectedSet.has(year));
+    }
+}
+
+function initMlOptions() {
+    if (!mlOptionsToggle || !mlOptionsDrawer) {
+        return;
+    }
+
+    renderMlYearFilters();
+    renderMlParamRows();
+
+    mlOptionsToggle.addEventListener("click", () => {
+        mlOptionsDrawer.classList.toggle("hidden");
+    });
+
+    if (mlSelectAllYears) {
+        mlSelectAllYears.addEventListener("change", () => {
+            selectedMlYears = mlSelectAllYears.checked ? [...ML_YEAR_CHOICES] : [currentYear];
+            renderMlYearFilters();
+        });
+    }
+
+    if (mlAddParamBtn) {
+        mlAddParamBtn.addEventListener("click", () => {
+            mlCustomParams.push({ key: "", value: "" });
+            renderMlParamRows();
+        });
+    }
+
+    if (mlParamList) {
+        mlParamList.addEventListener("click", event => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement) || !target.classList.contains("ml-param-remove")) {
+                return;
+            }
+            const row = target.closest(".ml-param-row");
+            if (!row) {
+                return;
+            }
+            const index = Number.parseInt(row.getAttribute("data-index"), 10);
+            if (!Number.isNaN(index)) {
+                mlCustomParams.splice(index, 1);
+                renderMlParamRows();
+            }
+        });
+    }
+
+    if (mlApplyOptionsBtn) {
+        mlApplyOptionsBtn.addEventListener("click", () => {
+            const yearInputs = Array.from(document.querySelectorAll(".ml-year-filter"));
+            const selected = yearInputs
+                .filter(input => input.checked)
+                .map(input => Number.parseInt(input.value, 10))
+                .filter(value => !Number.isNaN(value));
+            selectedMlYears = selected.length ? selected : [currentYear];
+
+            const rows = Array.from(document.querySelectorAll(".ml-param-row"));
+            mlCustomParams = rows
+                .map(row => {
+                    const keyInput = row.querySelector(".ml-param-key");
+                    const valueInput = row.querySelector(".ml-param-value");
+                    return {
+                        key: keyInput ? keyInput.value.trim() : "",
+                        value: valueInput ? valueInput.value.trim() : "",
+                    };
+                })
+                .filter(item => item.key && item.value);
+
+            appendDebugLine("ml options applied", { years: selectedMlYears, params: mlCustomParams });
+            fetchGlobalMlTrend();
+            renderMlYearFilters();
+            renderMlParamRows();
+        });
+    }
+}
+
 function initUiToggles() {
     dataToggle.addEventListener("click", () => {
         dataDrawer.classList.toggle("hidden");
@@ -656,6 +833,10 @@ function initGlobalYearSelector() {
     globalYearSelector.addEventListener("change", event => {
         const selectedYear = Number.parseInt(event.target.value, 10);
         currentYear = Number.isNaN(selectedYear) ? 2024 : selectedYear;
+        if (selectedMlYears.length === 1) {
+            selectedMlYears = [currentYear];
+            renderMlYearFilters();
+        }
         appendDebugLine("year changed", { year: currentYear });
         fetchKpiData();
         fetchStations();
@@ -924,13 +1105,7 @@ function fetchStations() {
     const suffix = query.toString() ? `?${query.toString()}` : "";
     apiStatus.textContent = "Chargement des points d'intérêt...";
     
-    return fetchWithTimeout(`${API_URL}/api/stations${suffix}`)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`API stations failed: ${res.status}`);
-            }
-            return res.json();
-        })
+    return fetchJsonCached(`${API_URL}/api/stations${suffix}`)
         .then(payload => {
             stationPoints = payload.points || [];
             availableStationActivities = payload.activities_available || [];
@@ -1031,13 +1206,7 @@ function fetchKpiData() {
         query.set("weeks", selectedWeeks.join(","));
     }
 
-    fetchWithTimeout(`${API_URL}/api/data?${query.toString()}`)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error("API non disponible");
-            }
-            return res.json();
-        })
+    fetchJsonCached(`${API_URL}/api/data?${query.toString()}`)
         .then(payload => {
             availableWeeks = normalizeWeeksOrder(payload.weeks_available || []);
             selectedWeeks = normalizeWeeksOrder(payload.weeks_selected || selectedWeeks);
@@ -1079,13 +1248,7 @@ function fetchKpiData() {
 }
 
 function checkSnowflakeStatus() {
-    fetchWithTimeout(`${API_URL}/api/snowflake/status`, 8000)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error("Status endpoint unavailable");
-            }
-            return res.json();
-        })
+    fetchJsonCached(`${API_URL}/api/snowflake/status`, 8000, 6000)
         .then(status => {
             console.log("[API /api/snowflake/status]", status);
             appendDebugLine("/api/snowflake/status", status);
@@ -1113,6 +1276,7 @@ fetch("data/departements.geojson")
         stationsLayer = L.layerGroup().addTo(map);
         initThemeToggle();
         initUiToggles();
+        initMlOptions();
         initGlobalYearSelector();
         initPanelResize();
         checkSnowflakeStatus();
@@ -1128,4 +1292,5 @@ fetch("data/departements.geojson")
 
 window.addEventListener("resize", () => {
     fetchGlobalHolidays();
+    fetchGlobalMlTrend();
 });

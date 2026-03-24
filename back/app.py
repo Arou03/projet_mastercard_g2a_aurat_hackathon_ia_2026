@@ -186,10 +186,29 @@ def global_holidays_data():
 @app.route("/api/global/frequentation")
 def global_frequentation_data():
     year = max(2024, int(request.args.get("year", "2024").strip() if request.args.get("year", "2024").isdigit() else 2024))
-    selected_weeks = parse_weeks_param(request.args.get("weeks", ""))
-    weeks_key = ",".join(selected_weeks) if selected_weeks else "ALL"
+    years_param = request.args.get("years", "").strip()
+    requested_years = []
+    if years_param:
+        for token in years_param.split(","):
+            candidate = token.strip()
+            if candidate.isdigit():
+                requested_years.append(max(2024, int(candidate)))
+    if not requested_years:
+        requested_years = [year]
 
-    cache_key = f"api_global_frequentation:{year}:{weeks_key}"
+    ml_params = {}
+    for key, value in request.args.items():
+        if key.startswith("ml_param_"):
+            param_name = key[len("ml_param_"):].strip()
+            if param_name:
+                ml_params[param_name] = value
+
+    selected_weeks = parse_weeks_param(request.args.get("weeks", ""))
+    years_key = ",".join(str(y) for y in sorted(set(requested_years)))
+    weeks_key = ",".join(selected_weeks) if selected_weeks else "ALL"
+    params_key = ";".join(f"{k}={ml_params[k]}" for k in sorted(ml_params.keys())) if ml_params else "NONE"
+
+    cache_key = f"api_global_frequentation:{years_key}:{weeks_key}:{params_key}"
     cached_payload, hit = get_cache(cache_key)
     if hit:
         return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
@@ -197,16 +216,35 @@ def global_frequentation_data():
     data_source = "mock"
     try:
         if is_snowflake_configured():
-            payload = kpi_service.fetch_global_frequentation_from_snowflake(year, selected_weeks)
-            data_source = "snowflake" if year == 2024 else "ml_prediction"
+            base_data = kpi_service.fetch_global_frequentation_from_snowflake(2024, selected_weeks)
+            payload = kpi_service.build_global_frequentation_multi_from_base(
+                base_data.get("weeks", []),
+                base_data.get("values", []),
+                requested_years,
+                ml_params,
+            )
+            data_source = "snowflake" if all(y == 2024 for y in requested_years) else "ml_prediction"
         else:
-            payload = kpi_service.build_mock_global_frequentation(year, selected_weeks)
-            data_source = "mock" if year == 2024 else "ml_prediction"
+            base_data = kpi_service.build_mock_global_frequentation(2024, selected_weeks)
+            payload = kpi_service.build_global_frequentation_multi_from_base(
+                base_data.get("weeks", []),
+                base_data.get("values", []),
+                requested_years,
+                ml_params,
+            )
+            data_source = "mock" if all(y == 2024 for y in requested_years) else "ml_prediction"
     except Exception as exc:
         set_last_error(str(exc))
-        payload = kpi_service.build_mock_global_frequentation(year, selected_weeks)
-        data_source = "mock" if year == 2024 else "ml_prediction"
+        base_data = kpi_service.build_mock_global_frequentation(2024, selected_weeks)
+        payload = kpi_service.build_global_frequentation_multi_from_base(
+            base_data.get("weeks", []),
+            base_data.get("values", []),
+            requested_years,
+            ml_params,
+        )
+        data_source = "mock" if all(y == 2024 for y in requested_years) else "ml_prediction"
 
+    payload["selected_year"] = year
     payload["data_source"] = data_source
     payload["snowflake_error"] = get_last_error()
     set_cache(cache_key, payload)

@@ -183,6 +183,66 @@ def build_mock_global_frequentation(year=2024, selected_weeks=None):
         "year": year,
     }
 
+
+def _to_float_or_default(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _apply_ml_params_to_series(base_values, year, ml_params=None):
+    ml_params = ml_params or {}
+    growth_rate = _to_float_or_default(ml_params.get("growth_rate"), 0.05)
+    level_shift = _to_float_or_default(ml_params.get("level_shift"), 0.0)
+    volatility_scale = _to_float_or_default(ml_params.get("volatility_scale"), 1.0)
+
+    growth_factor = 1.0 + (growth_rate * (int(year) - 2024))
+    projected = [to_int(v * growth_factor + level_shift) for v in base_values]
+
+    # Optional volatility shaping around the mean of the projected curve.
+    if projected and abs(volatility_scale - 1.0) > 1e-9:
+        avg = sum(projected) / len(projected)
+        projected = [to_int(avg + ((v - avg) * volatility_scale)) for v in projected]
+
+    # Unknown params are still usable: each numeric value contributes a mild multiplicative adjustment.
+    generic_multiplier = 1.0
+    for key, raw_value in ml_params.items():
+        if key in {"growth_rate", "level_shift", "volatility_scale"}:
+            continue
+        try:
+            numeric = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        generic_multiplier *= (1.0 + (numeric / 100.0))
+
+    if abs(generic_multiplier - 1.0) > 1e-9:
+        projected = [to_int(v * generic_multiplier) for v in projected]
+
+    return projected
+
+
+def build_global_frequentation_multi_from_base(weeks, observed_values, years, ml_params=None):
+    years = sorted(set(max(2024, int(y)) for y in (years or [2024])))
+    palette = ["#086cb2", "#d14247", "#1a7251", "#90437d", "#d4a434", "#00a0df"]
+
+    series = []
+    for index, year in enumerate(years):
+        values = _apply_ml_params_to_series(observed_values, year, ml_params)
+        series.append({
+            "year": year,
+            "label": f"{year}",
+            "values": values,
+            "color": palette[index % len(palette)],
+        })
+
+    return {
+        "weeks": weeks,
+        "years": years,
+        "series": series,
+        "ml_params_applied": ml_params or {},
+    }
+
 def build_mock_department_timeline(canonical_name, year=2024):
     base = DEPARTMENT_KPIS.get(canonical_name, DEPARTMENT_KPIS["Savoie"])
     weeks = ["S51", "S52"] + [f"S{i}" for i in range(1, 16)]

@@ -160,6 +160,57 @@ h2 {
     position: relative;
 }
 
+.ml-frame {
+    position: relative;
+}
+
+.ml-toggle {
+    top: 10px;
+    left: 10px;
+}
+
+.ml-drawer {
+    top: 46px;
+    left: 10px;
+    width: 260px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.ml-param-list {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.ml-param-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 28px;
+    gap: 6px;
+    align-items: center;
+}
+
+.ml-param-row input {
+    width: 100%;
+    border: 1px solid #9eb6cf;
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: #ffffff;
+    color: #162c4a;
+    font-size: 12px;
+}
+
+.ml-param-remove {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #9eb6cf;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #162c4a;
+    cursor: pointer;
+    font-weight: 700;
+}
+
 #map {
     height: 74vh;
     border-radius: 8px;

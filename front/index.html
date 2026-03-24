@@ -81,7 +81,27 @@
                 <h3>Evolution ML de la frequentation</h3>
                 <p id="globalMlStatus">Chargement...</p>
             </div>
-            <canvas id="globalMlTimeline" class="dep-chart" width="1200" height="260"></canvas>
+            <div class="ml-frame">
+                <button id="mlOptionsToggle" class="map-toggle ml-toggle" type="button" title="Options du graphique ML">☰</button>
+                <div id="mlOptionsDrawer" class="map-drawer ml-drawer hidden">
+                    <h3>Options ML</h3>
+                    <div class="drawer-section">
+                        <p class="drawer-title">Annees (multi-selection)</p>
+                        <label><input type="checkbox" id="mlSelectAllYears" checked> Tout selectionner</label>
+                        <div id="mlYearFilters" class="week-filters"></div>
+                    </div>
+                    <div class="drawer-section">
+                        <p class="drawer-title">Parametres dynamiques</p>
+                        <div id="mlParamList" class="ml-param-list"></div>
+                        <button id="mlAddParamBtn" class="debug-toggle" type="button">Ajouter parametre</button>
+                    </div>
+                    <div class="drawer-section">
+                        <button id="mlApplyOptionsBtn" class="debug-toggle" type="button">Appliquer</button>
+                    </div>
+                </div>
+                <canvas id="globalMlTimeline" class="dep-chart" width="1200" height="260"></canvas>
+            </div>
+            <div id="globalMlLegend" class="timeline-legend"></div>
         </section>
     </div>
 
