@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import base64
+import datetime
 import os
 import re
 import time
@@ -36,6 +37,21 @@ ALIASES = {
     "Isere": "Isère",
     "Puy-de-Dome": "Puy-de-Dôme",
     "Rhone": "Rhône",
+}
+
+DEPARTMENT_TO_CODE = {
+    "Ain": "01",
+    "Allier": "03",
+    "Ardeche": "07",
+    "Cantal": "15",
+    "Drome": "26",
+    "Haute-Loire": "43",
+    "Haute-Savoie": "74",
+    "Isere": "38",
+    "Loire": "42",
+    "Puy-de-Dome": "63",
+    "Rhone": "69",
+    "Savoie": "73",
 }
 
 VALID_KPIS = {"total_aura", "rural", "urbain", "stations_montagne", "villages_montagne"}
@@ -220,6 +236,489 @@ def parse_activities_param(raw_value):
         seen.add(normalized)
         items.append(activity)
     return items
+
+
+def parse_week_number(week_value):
+    text = str(week_value or "").upper().strip()
+    if text.startswith("S") and text[1:].isdigit():
+        return int(text[1:])
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def week_label(week_value):
+    number = parse_week_number(week_value)
+    if number is None:
+        return str(week_value or "").upper().strip()
+    return f"S{number}"
+
+
+def season_week_sort(week_value):
+    number = parse_week_number(week_value)
+    if number is None:
+        return 999
+    if number == 51:
+        return 0
+    if number == 52:
+        return 1
+    if 1 <= number <= 15:
+        return number + 1
+    return number + 200
+
+
+def week_label_from_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        iso_week = value.isocalendar().week
+        return f"S{iso_week}"
+    if isinstance(value, datetime.date):
+        iso_week = value.isocalendar().week
+        return f"S{iso_week}"
+
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        date_value = datetime.datetime.fromisoformat(text.replace("Z", "")).date()
+        return f"S{date_value.isocalendar().week}"
+    except ValueError:
+        return None
+
+
+def is_winter_week(week_label):
+    """Check if a week is in winter period (S51, S52, S1-S15)."""
+    num = parse_week_number(week_label)
+    if num is None:
+        return False
+    return num == 51 or num == 52 or (1 <= num <= 15)
+
+
+def filter_winter_holidays(holidays):
+    """Filter holidays to only include those in winter weeks."""
+    winter_holidays = []
+    for h in holidays:
+        week_start = h.get("week_start")
+        week_end = h.get("week_end")
+        # Include holiday if it spans winter weeks (check if start or end is in winter)
+        if is_winter_week(week_start) or is_winter_week(week_end):
+            winter_holidays.append(h)
+    return winter_holidays
+
+
+def build_mock_department_timeline(canonical_name, year=2024):
+    """Build mock timeline data for a department and year.
+    For 2024: use base KPIS. For 2025+: apply growth factor (5% per year).
+    """
+    base = DEPARTMENT_KPIS.get(canonical_name, DEPARTMENT_KPIS["Savoie"])
+    weeks = ["S51", "S52"] + [f"S{i}" for i in range(1, 16)]
+    
+    # Growth factor for future years (5% annual growth)
+    year = max(2024, int(year))
+    growth_factor = 1.0 + (0.05 * (year - 2024))
+
+    observed = []
+    rural = []
+    urbain = []
+    stations = []
+    villages = []
+    for index, _ in enumerate(weeks):
+        variation = 1 + (0.08 * ((index % 5) - 2))
+        observed.append(to_int(base["total_aura"] * variation * growth_factor))
+        rural.append(to_int(base["rural"] * variation * growth_factor))
+        urbain.append(to_int(base["urbain"] * variation * growth_factor))
+        stations.append(to_int(base["stations_montagne"] * variation * growth_factor))
+        villages.append(to_int(base["villages_montagne"] * variation * growth_factor))
+
+    # Generate realistic winter holidays
+    holidays = []
+    
+    # Vacances de Noël (S51-S1, typically Dec 23 - Jan 8)
+    holidays.append({
+        "country_code": "FR",
+        "country_name": "France",
+        "season": "HIVER",
+        "holiday_type": "VACANCES_NOEL",
+        "week_start": "S51",
+        "week_end": "S1",
+        "date_start": f"{year-1}-12-23",
+        "date_end": f"{year}-01-08",
+    })
+    
+    # Vacances de ski (S6-S9, typically Feb 10 - Mar 3)
+    holidays.append({
+        "country_code": "FR",
+        "country_name": "France",
+        "season": "HIVER",
+        "holiday_type": "VACANCES_SKI",
+        "week_start": "S6",
+        "week_end": "S9",
+        "date_start": f"{year}-02-10",
+        "date_end": f"{year}-03-03",
+    })
+
+    return {
+        "weeks": weeks,
+        "series": [
+            {"id": "observed", "label": "Frequentation observee", "values": observed, "color": "#086cb2"},
+            {"id": "prediction", "label": "Prediction" if year > 2024 else "", "values": [None for _ in weeks] if year == 2024 else observed, "color": "#d14247"},
+            {"id": "rural", "label": "Feature rural", "values": rural, "color": "#1a7251"},
+            {"id": "urbain", "label": "Feature urbain", "values": urbain, "color": "#90437d"},
+            {"id": "stations", "label": "Feature stations montagne", "values": stations, "color": "#d4a434"},
+            {"id": "villages", "label": "Feature villages montagne", "values": villages, "color": "#00a0df"},
+        ],
+        "holidays": filter_winter_holidays(holidays),
+        "countries": ["France"],
+    }
+
+
+def build_mock_global_holidays(year=2024):
+    """Build global holidays (winter period) for the homepage, grouped by countries."""
+    year = max(2024, int(year))
+    weeks = ["S51", "S52"] + [f"S{i}" for i in range(1, 16)]
+
+    holidays = [
+        {
+            "country_code": "FR",
+            "country_name": "France",
+            "season": "HIVER",
+            "holiday_type": "VACANCES_NOEL",
+            "week_start": "S51",
+            "week_end": "S1",
+            "date_start": f"{year-1}-12-23",
+            "date_end": f"{year}-01-08",
+        },
+        {
+            "country_code": "FR",
+            "country_name": "France",
+            "season": "HIVER",
+            "holiday_type": "VACANCES_HIVER",
+            "week_start": "S6",
+            "week_end": "S9",
+            "date_start": f"{year}-02-10",
+            "date_end": f"{year}-03-03",
+        },
+        {
+            "country_code": "BE",
+            "country_name": "Belgique",
+            "season": "HIVER",
+            "holiday_type": "VACANCES_CARNAVAL",
+            "week_start": "S8",
+            "week_end": "S9",
+            "date_start": f"{year}-02-17",
+            "date_end": f"{year}-03-01",
+        },
+        {
+            "country_code": "DE",
+            "country_name": "Allemagne",
+            "season": "HIVER",
+            "holiday_type": "FERIEN_HIVER",
+            "week_start": "S7",
+            "week_end": "S8",
+            "date_start": f"{year}-02-10",
+            "date_end": f"{year}-02-24",
+        },
+        {
+            "country_code": "NL",
+            "country_name": "Pays-Bas",
+            "season": "HIVER",
+            "holiday_type": "VOORJAARSVAKANTIE",
+            "week_start": "S8",
+            "week_end": "S9",
+            "date_start": f"{year}-02-17",
+            "date_end": f"{year}-03-01",
+        },
+        {
+            "country_code": "GB",
+            "country_name": "Royaume-Uni",
+            "season": "HIVER",
+            "holiday_type": "HALF_TERM",
+            "week_start": "S7",
+            "week_end": "S8",
+            "date_start": f"{year}-02-10",
+            "date_end": f"{year}-02-23",
+        },
+    ]
+
+    winter_holidays = filter_winter_holidays(holidays)
+    countries = sorted({item.get("country_name") for item in winter_holidays if item.get("country_name")})
+
+    return {
+        "weeks": weeks,
+        "holidays": winter_holidays,
+        "countries": countries,
+    }
+
+
+def fetch_global_holidays_from_snowflake(year):
+    """Fetch global holidays for a selected winter season from CLEANED.CALENDAR_SCHOOL_HOLIDAYS."""
+    holidays_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "CALENDAR_SCHOOL_HOLIDAYS")
+    countries_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_COUNTRIES")
+    season_code = f"H{str(int(year))[-2:]}".upper()
+
+    private_key = load_private_key_der_bytes()
+    connection = snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=SNOWFLAKE_SCHEMA_PUBLIC,
+        private_key=private_key,
+        login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+        network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+        socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+        ocsp_fail_open=True,
+        session_parameters={"QUERY_TAG": "aura_global_holidays"},
+    )
+
+    try:
+        with connection.cursor(DictCursor) as cursor:
+            query = (
+                "SELECT "
+                "h.CODE_PAYS AS code_pays, "
+                "COALESCE(c.NOM, h.CODE_PAYS) AS country_name, "
+                "h.DEBUT AS debut, "
+                "h.FIN AS fin, "
+                "h.SAISON AS saison, "
+                "h.TYPE_VACANCES AS type_vacances "
+                f"FROM {holidays_table} h "
+                f"LEFT JOIN {countries_table} c ON c.CODE_PAYS = h.CODE_PAYS "
+                "WHERE h.DEBUT IS NOT NULL "
+                "AND h.FIN IS NOT NULL "
+                "AND UPPER(h.SAISON) = %s"
+            )
+            cursor.execute(query, (season_code,), timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    holidays = []
+    countries = set()
+    weeks = set()
+
+    for row in rows:
+        week_start = week_label_from_date(read_ci(row, "debut"))
+        week_end = week_label_from_date(read_ci(row, "fin"))
+        if not week_start or not week_end:
+            continue
+
+        code = str(read_ci(row, "code_pays") or "").strip().upper()
+        country_name = str(read_ci(row, "country_name") or code or "Inconnu").strip()
+
+        debut_value = read_ci(row, "debut")
+        fin_value = read_ci(row, "fin")
+        if isinstance(debut_value, datetime.datetime):
+            date_start = debut_value.date().isoformat()
+        elif isinstance(debut_value, datetime.date):
+            date_start = debut_value.isoformat()
+        else:
+            date_start = str(debut_value or "")
+
+        if isinstance(fin_value, datetime.datetime):
+            date_end = fin_value.date().isoformat()
+        elif isinstance(fin_value, datetime.date):
+            date_end = fin_value.isoformat()
+        else:
+            date_end = str(fin_value or "")
+
+        holidays.append(
+            {
+                "country_code": code,
+                "country_name": country_name,
+                "season": str(read_ci(row, "saison") or "").strip(),
+                "holiday_type": str(read_ci(row, "type_vacances") or "").strip(),
+                "week_start": week_start,
+                "week_end": week_end,
+                "date_start": date_start,
+                "date_end": date_end,
+            }
+        )
+        countries.add(country_name)
+        weeks.add(week_start)
+        weeks.add(week_end)
+
+    winter_holidays = filter_winter_holidays(holidays)
+    winter_weeks = sorted(
+        {
+            w
+            for item in winter_holidays
+            for w in (item.get("week_start"), item.get("week_end"))
+            if w
+        },
+        key=season_week_sort,
+    )
+
+    winter_countries = sorted(
+        {
+            item.get("country_name")
+            for item in winter_holidays
+            if item.get("country_name")
+        }
+    )
+
+    return {
+        "year": int(year),
+        "season": season_code,
+        "weeks": winter_weeks,
+        "holidays": winter_holidays,
+        "countries": winter_countries,
+    }
+
+
+def fetch_department_timeline_from_snowflake(canonical_name):
+    fact_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "FREQ_GLOBAL_PER_DEPT")
+    holidays_table = fq_table(SNOWFLAKE_FACT_SCHEMA, "CALENDAR_SCHOOL_HOLIDAYS")
+    countries_table = fq_table(SNOWFLAKE_DIM_SCHEMA, "DIM_COUNTRIES")
+    department_code = DEPARTMENT_TO_CODE.get(canonical_name)
+
+    private_key = load_private_key_der_bytes()
+    connection = snowflake.connector.connect(
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        user=os.getenv("SNOWFLAKE_USER"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=SNOWFLAKE_SCHEMA_PUBLIC,
+        private_key=private_key,
+        login_timeout=SNOWFLAKE_LOGIN_TIMEOUT_SECONDS,
+        network_timeout=SNOWFLAKE_NETWORK_TIMEOUT_SECONDS,
+        socket_timeout=SNOWFLAKE_SOCKET_TIMEOUT_SECONDS,
+        ocsp_fail_open=True,
+        session_parameters={"QUERY_TAG": "aura_department_timeline"},
+    )
+
+    try:
+        with connection.cursor(DictCursor) as cursor:
+            if department_code:
+                weekly_query = (
+                    "SELECT "
+                    "WEEK AS week, "
+                    "SUM(TOTAL_AURA) AS total_aura, "
+                    "SUM(RURAL) AS rural, "
+                    "SUM(URBAIN) AS urbain, "
+                    "SUM(STATIONS_MONTAGNE) AS stations_montagne, "
+                    "SUM(VILLAGES_MONTAGNE) AS villages_montagne "
+                    f"FROM {fact_table} "
+                    "WHERE CODE_DEPARTEMENT = %s "
+                    "GROUP BY WEEK"
+                )
+                cursor.execute(weekly_query, (department_code,), timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            else:
+                weekly_query = (
+                    "SELECT "
+                    "WEEK AS week, "
+                    "SUM(TOTAL_AURA) AS total_aura, "
+                    "SUM(RURAL) AS rural, "
+                    "SUM(URBAIN) AS urbain, "
+                    "SUM(STATIONS_MONTAGNE) AS stations_montagne, "
+                    "SUM(VILLAGES_MONTAGNE) AS villages_montagne "
+                    f"FROM {fact_table} "
+                    "GROUP BY WEEK"
+                )
+                cursor.execute(weekly_query, timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            weekly_rows = cursor.fetchall()
+
+        week_values = {}
+        for row in weekly_rows:
+            week = week_label(read_ci(row, "week"))
+            week_values[week] = {
+                "total_aura": to_int(read_ci(row, "total_aura")),
+                "rural": to_int(read_ci(row, "rural")),
+                "urbain": to_int(read_ci(row, "urbain")),
+                "stations_montagne": to_int(read_ci(row, "stations_montagne")),
+                "villages_montagne": to_int(read_ci(row, "villages_montagne")),
+            }
+
+        ordered_weeks = sorted(week_values.keys(), key=season_week_sort)
+
+        with connection.cursor(DictCursor) as cursor:
+            holidays_query = (
+                "SELECT "
+                "h.CODE_PAYS AS code_pays, "
+                "COALESCE(c.NOM, h.CODE_PAYS) AS country_name, "
+                "h.DEBUT AS debut, "
+                "h.FIN AS fin, "
+                "h.SAISON AS saison, "
+                "h.TYPE_VACANCES AS type_vacances "
+                f"FROM {holidays_table} h "
+                f"LEFT JOIN {countries_table} c ON c.CODE_PAYS = h.CODE_PAYS "
+                "WHERE h.DEBUT IS NOT NULL AND h.FIN IS NOT NULL"
+            )
+            cursor.execute(holidays_query, timeout=SNOWFLAKE_QUERY_TIMEOUT_SECONDS)
+            holiday_rows = cursor.fetchall()
+    finally:
+        connection.close()
+
+    holidays = []
+    countries = set()
+    for row in holiday_rows:
+        week_start = week_label_from_date(read_ci(row, "debut"))
+        week_end = week_label_from_date(read_ci(row, "fin"))
+        if not week_start or not week_end:
+            continue
+
+        country_name = str(read_ci(row, "country_name") or read_ci(row, "code_pays") or "").strip()
+        if country_name:
+            countries.add(country_name)
+
+        holidays.append(
+            {
+                "country_code": str(read_ci(row, "code_pays") or "").strip(),
+                "country_name": country_name,
+                "season": str(read_ci(row, "saison") or "").strip(),
+                "holiday_type": str(read_ci(row, "type_vacances") or "").strip(),
+                "week_start": week_start,
+                "week_end": week_end,
+            }
+        )
+
+    series = [
+        {
+            "id": "observed",
+            "label": "Frequentation observee",
+            "values": [week_values[week]["total_aura"] for week in ordered_weeks],
+            "color": "#086cb2",
+        },
+        {
+            "id": "prediction",
+            "label": "Prediction (placeholder)",
+            "values": [None for _ in ordered_weeks],
+            "color": "#d14247",
+        },
+        {
+            "id": "rural",
+            "label": "Feature rural",
+            "values": [week_values[week]["rural"] for week in ordered_weeks],
+            "color": "#1a7251",
+        },
+        {
+            "id": "urbain",
+            "label": "Feature urbain",
+            "values": [week_values[week]["urbain"] for week in ordered_weeks],
+            "color": "#90437d",
+        },
+        {
+            "id": "stations",
+            "label": "Feature stations montagne",
+            "values": [week_values[week]["stations_montagne"] for week in ordered_weeks],
+            "color": "#d4a434",
+        },
+        {
+            "id": "villages",
+            "label": "Feature villages montagne",
+            "values": [week_values[week]["villages_montagne"] for week in ordered_weeks],
+            "color": "#00a0df",
+        },
+    ]
+
+    return {
+        "weeks": ordered_weeks,
+        "series": series,
+        "holidays": holidays,
+        "countries": sorted(list(countries)),
+    }
 
 
 def week_sort_key(week_value):
@@ -693,6 +1192,116 @@ def department_data(dep_name):
     except Exception as exc:
         last_snowflake_error = f"api/department runtime error: {exc}"
         return jsonify({"error": last_snowflake_error}), 500
+
+
+@app.route("/api/global/holidays")
+def global_holidays_data():
+    global last_snowflake_error
+
+    year_param = request.args.get("year", "2024").strip()
+    try:
+        year = int(year_param)
+        year = max(2024, year)
+    except ValueError:
+        year = 2024
+
+    cache_key = f"api_global_holidays:{year}"
+    cached_payload, payload_cache_hit = get_cache(cache_key)
+    if payload_cache_hit:
+        payload = dict(cached_payload)
+        payload["cache"] = {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}
+        return jsonify(payload)
+
+    data_source = "mock"
+    try:
+        if is_snowflake_configured():
+            snowflake_data = fetch_global_holidays_from_snowflake(year)
+            payload = {
+                "year": year,
+                "season": snowflake_data.get("season"),
+                "weeks": snowflake_data.get("weeks", []),
+                "holidays": snowflake_data.get("holidays", []),
+                "countries": snowflake_data.get("countries", []),
+                "data_source": "snowflake",
+                "snowflake_error": last_snowflake_error,
+            }
+            data_source = "snowflake"
+        else:
+            mock_data = build_mock_global_holidays(year)
+            payload = {
+                "year": year,
+                "weeks": mock_data["weeks"],
+                "holidays": mock_data["holidays"],
+                "countries": mock_data["countries"],
+                "data_source": "mock",
+                "snowflake_error": last_snowflake_error,
+            }
+    except Exception as exc:
+        last_snowflake_error = str(exc)
+        mock_data = build_mock_global_holidays(year)
+        payload = {
+            "year": year,
+            "weeks": mock_data["weeks"],
+            "holidays": mock_data["holidays"],
+            "countries": mock_data["countries"],
+            "data_source": "mock",
+            "snowflake_error": last_snowflake_error,
+        }
+
+    set_cache(cache_key, payload)
+    payload["cache"] = {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}
+    payload["data_source"] = data_source
+    return jsonify(payload)
+
+
+@app.route("/api/department/<dep_name>/timeline")
+def department_timeline(dep_name):
+    global last_snowflake_error
+
+    canonical_name = normalize_department_name(dep_name)
+    if not canonical_name:
+        return jsonify({"error": f"Unknown department: {dep_name}"}), 404
+
+    # Parse year parameter (2024 = observed, 2025+ = ML predictions)
+    year_param = request.args.get("year", "2024").strip()
+    try:
+        year = int(year_param)
+        year = max(2024, year)  # Minimum 2024
+    except ValueError:
+        year = 2024
+
+    cache_key = f"api_department_timeline:{canonical_name}:{year}"
+    cached_payload, payload_cache_hit = get_cache(cache_key)
+    if payload_cache_hit:
+        payload = dict(cached_payload)
+        payload["cache"] = {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}
+        return jsonify(payload)
+
+    data_source = "mock"
+    try:
+        if year == 2024 and is_snowflake_configured():
+            # For 2024, try to fetch from Snowflake FREQ_GLOBAL_PER_DEPT
+            timeline = fetch_department_timeline_from_snowflake(canonical_name)
+            # Filter holidays to winter only
+            timeline["holidays"] = filter_winter_holidays(timeline.get("holidays", []))
+            data_source = "snowflake"
+        else:
+            # For 2024 without Snowflake or 2025+: use mock with growth factor
+            timeline = build_mock_department_timeline(canonical_name, year=year)
+    except Exception as exc:
+        last_snowflake_error = str(exc)
+        timeline = build_mock_department_timeline(canonical_name, year=year)
+
+    payload = {
+        "name": to_display_name(canonical_name),
+        "year": year,
+        "timeline": timeline,
+        "data_source": data_source,
+        "snowflake_error": last_snowflake_error,
+    }
+    set_cache(cache_key, payload)
+    payload["cache"] = {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}
+    return jsonify(payload)
 
 
 def extract_activities_from_array(array_value):

@@ -36,12 +36,13 @@
                 </div>
 
                 <div class="drawer-section">
-                    <p class="drawer-title">Semaines (multi-selection)</p>
+                    <p class="drawer-title">Semaines</p>
                     <div id="weekFilters" class="week-filters">Chargement...</div>
                 </div>
 
                 <div class="drawer-section">
                     <p class="drawer-title">Activites stations (multi-selection)</p>
+                    <label><input type="checkbox" id="selectAllActivities" checked> Tout selectionner</label>
                     <div id="stationActivityFilters" class="week-filters">Chargement...</div>
                 </div>
             </div>
@@ -52,15 +53,29 @@
 
     <!-- VISU -->
     <div class="panel viz-panel">
-        <h2>Visualisations globales</h2>
+        <div class="panel-title-row">
+            <h2>Visualisations globales</h2>
+            <select id="globalYearSelector" class="year-select">
+                <option value="2024">2024 (données observées)</option>
+                <option value="2025">2025 (prédiction ML)</option>
+                <option value="2026">2026 (prédiction ML)</option>
+                <option value="2027">2027 (prédiction ML)</option>
+            </select>
+        </div>
         <div class="debug-box">
             <button id="debugToggle" class="debug-toggle" type="button">Console debug</button>
             <pre id="debugConsole" class="debug-console hidden">Initialisation...</pre>
         </div>
         <p class="api-status" id="apiStatus">Chargement des donnees...</p>
-        <div id="viz" class="viz-placeholder">
-            Chargement des indicateurs...
-        </div>
+
+        <section class="holiday-panel">
+            <div class="holiday-panel-head">
+                <h3>Vacances scolaires par pays</h3>
+                <p id="globalHolidayStatus">Chargement...</p>
+            </div>
+            <canvas id="globalHolidayTimeline" class="dep-chart" width="1200" height="280"></canvas>
+            <div id="globalHolidayLegend" class="timeline-legend"></div>
+        </section>
     </div>
 
 </div>
