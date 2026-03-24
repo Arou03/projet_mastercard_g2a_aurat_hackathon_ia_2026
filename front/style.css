@@ -743,6 +743,35 @@ body.light-mode .holiday-tooltip {
     height: 360px;
 }
 
+#expensesTimelineChart.dep-chart {
+    height: 280px;
+}
+
+#expensesCompareChart.dep-chart {
+    height: 190px;
+}
+
+.expenses-controls {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+}
+
+.expenses-controls label {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: grid;
+    gap: 4px;
+}
+
+.expenses-controls .debug-toggle {
+    margin: 0;
+    height: 36px;
+}
+
 .timeline-legend {
     margin-top: 10px;
     display: flex;
@@ -892,5 +921,9 @@ label {
 
     .panel-title-row {
         padding-right: 0;
+    }
+
+    .expenses-controls {
+        grid-template-columns: 1fr 1fr;
     }
 }

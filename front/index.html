@@ -99,6 +99,30 @@
             </div>
             <div id="globalMlLegend" class="timeline-legend"></div>
         </section>
+
+        <section class="holiday-panel">
+            <div class="holiday-panel-head">
+                <h3>Prediction ML des depenses internationales</h3>
+                <p id="expensesStatus">Chargement...</p>
+            </div>
+            <div class="expenses-controls">
+                <label>Pays
+                    <select id="expensesCountrySelect" class="year-select"></select>
+                </label>
+                <label>Saison
+                    <input id="expensesSeasonInput" class="year-select" type="text" placeholder="H26">
+                </label>
+                <label>Semaine
+                    <input id="expensesWeekInput" class="year-select" type="number" min="1" max="52" value="3">
+                </label>
+                <label>Objectif (€)
+                    <input id="expensesObjectiveInput" class="year-select" type="number" min="0" step="1000" value="4800000">
+                </label>
+                <button id="expensesApplyBtn" class="debug-toggle" type="button">Mettre a jour</button>
+            </div>
+            <canvas id="expensesTimelineChart" class="dep-chart" width="1200" height="260"></canvas>
+            <canvas id="expensesCompareChart" class="dep-chart" width="1200" height="170"></canvas>
+        </section>
     </div>
 
 </div>

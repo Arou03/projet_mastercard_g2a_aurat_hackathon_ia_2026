@@ -1,11 +1,7 @@
 // =========================
 // API CONFIG
 // =========================
-const REMOTE_API_FALLBACK = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
-const API_URL = (
-    localStorage.getItem("apiBaseUrl")
-    || ((window.location.hostname || "").includes("onrender.com") ? window.location.origin : REMOTE_API_FALLBACK)
-).replace(/\/$/, "");
+const API_URL = "https://projet-mastercard-g2a-aurat-hackathon-ia.onrender.com";
 const FETCH_TIMEOUT_MS = 30000;
 const CLIENT_CACHE_TTL_MS = 12000;
 const ML_YEAR_CHOICES = [2024, 2025, 2026, 2027];
@@ -83,6 +79,14 @@ const mlSelectAllYears = document.getElementById("mlSelectAllYears");
 const mlParamList = document.getElementById("mlParamList");
 const mlAddParamBtn = document.getElementById("mlAddParamBtn");
 const mlApplyOptionsBtn = document.getElementById("mlApplyOptionsBtn");
+const expensesStatus = document.getElementById("expensesStatus");
+const expensesCountrySelect = document.getElementById("expensesCountrySelect");
+const expensesSeasonInput = document.getElementById("expensesSeasonInput");
+const expensesWeekInput = document.getElementById("expensesWeekInput");
+const expensesObjectiveInput = document.getElementById("expensesObjectiveInput");
+const expensesApplyBtn = document.getElementById("expensesApplyBtn");
+const expensesTimelineChart = document.getElementById("expensesTimelineChart");
+const expensesCompareChart = document.getElementById("expensesCompareChart");
 const debugToggle = document.getElementById("debugToggle");
 const debugConsole = document.getElementById("debugConsole");
 const mapResizeHandle = document.getElementById("mapResizeHandle");
@@ -109,6 +113,8 @@ let globalHolidaySegments = [];
 let holidayTooltipEl = null;
 let selectedMlYears = [...ML_YEAR_CHOICES];
 let mlCustomParams = [];
+let expensesCountries = [];
+let latestExpensesSeries = null;
 const clientResponseCache = new Map();
 const inFlightRequests = new Map();
 
@@ -489,6 +495,323 @@ function drawGlobalMlTrend(weeks, series) {
             .map((item, seriesIndex) => `<span class="legend-chip"><span class="legend-dot" style="background:${mlSeriesColor(seriesIndex, item.color)}"></span>${item.label || item.year}</span>`)
             .join("");
     }
+}
+
+function drawExpensesTimeline(weeks, predictions, selectedWeek) {
+    if (!expensesTimelineChart) {
+        return;
+    }
+
+    const { ctx, width, height } = getCanvasSize(expensesTimelineChart);
+    const pad = { top: 20, right: 20, bottom: 34, left: 72 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+    const theme = getChartTheme();
+
+    const numericValues = (predictions || []).filter(value => typeof value === "number" && !Number.isNaN(value));
+    const minValue = numericValues.length ? Math.min(...numericValues) : 0;
+    const maxValue = numericValues.length ? Math.max(...numericValues) : 1;
+    const range = Math.max(1, maxValue - minValue);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = theme.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + (chartH * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+    }
+
+    const xFromIndex = index => {
+        if ((weeks || []).length <= 1) return pad.left;
+        return pad.left + (index / (weeks.length - 1)) * chartW;
+    };
+    const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
+
+    const lineColor = document.body.classList.contains("light-mode") ? "#086cb2" : "#7be8ff";
+    const selectedPointColor = document.body.classList.contains("light-mode") ? "#d14247" : "#ffd37d";
+
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    let started = false;
+    (predictions || []).forEach((value, index) => {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return;
+        }
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    if (started) {
+        ctx.stroke();
+    }
+
+    (predictions || []).forEach((value, index) => {
+        if (typeof value !== "number" || Number.isNaN(value)) {
+            return;
+        }
+        const weekText = String(weeks[index] || "").toUpperCase();
+        const weekNumber = toWeekNumber(weekText);
+        const isSelected = Number.isFinite(selectedWeek) && weekNumber === selectedWeek;
+        const x = xFromIndex(index);
+        const y = yFromValue(value);
+        ctx.beginPath();
+        ctx.fillStyle = isSelected ? selectedPointColor : lineColor;
+        ctx.arc(x, y, isSelected ? 5 : 3.4, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.fillStyle = theme.text;
+    ctx.font = "12px Luciole, Segoe UI, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${formatNumber(minValue)} €`, pad.left - 8, pad.top + chartH + 4);
+    ctx.fillText(`${formatNumber(maxValue)} €`, pad.left - 8, pad.top + 4);
+
+    ctx.textAlign = "center";
+    const tickIndexes = [0, Math.floor((weeks.length - 1) / 3), Math.floor(((weeks.length - 1) * 2) / 3), Math.max(0, weeks.length - 1)];
+    const seen = new Set();
+    tickIndexes.forEach(index => {
+        if (seen.has(index) || !weeks[index]) {
+            return;
+        }
+        seen.add(index);
+        ctx.fillText(String(weeks[index]), xFromIndex(index), height - 10);
+    });
+}
+
+function drawExpensesCompare(predictedValue, objectiveValue) {
+    if (!expensesCompareChart) {
+        return;
+    }
+
+    const { ctx, width, height } = getCanvasSize(expensesCompareChart);
+    const pad = { top: 20, right: 18, bottom: 24, left: 48 };
+    const theme = getChartTheme();
+
+    const prediction = typeof predictedValue === "number" && !Number.isNaN(predictedValue) ? predictedValue : 0;
+    const objective = typeof objectiveValue === "number" && !Number.isNaN(objectiveValue) ? objectiveValue : 0;
+    const maxValue = Math.max(1, prediction, objective);
+
+    const bars = [
+        { label: "Prediction", value: prediction, color: document.body.classList.contains("light-mode") ? "#086cb2" : "#7be8ff" },
+        { label: "Objectif", value: objective, color: document.body.classList.contains("light-mode") ? "#d14247" : "#ff9ed3" },
+    ];
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, width, height);
+
+    const chartW = width - pad.left - pad.right;
+    const barW = Math.min(180, chartW / 3.2);
+    const gap = Math.max(24, (chartW - barW * 2) / 3);
+    const baseY = height - pad.bottom;
+    const maxH = height - pad.top - pad.bottom;
+
+    bars.forEach((bar, index) => {
+        const x = pad.left + gap + index * (barW + gap);
+        const h = (bar.value / maxValue) * maxH;
+        const y = baseY - h;
+
+        ctx.fillStyle = bar.color;
+        ctx.globalAlpha = 0.88;
+        ctx.fillRect(x, y, barW, h);
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = theme.text;
+        ctx.font = "12px Luciole, Segoe UI, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(bar.label, x + barW / 2, baseY + 14);
+        ctx.fillText(`${formatNumber(bar.value)} €`, x + barW / 2, y - 6);
+    });
+
+    ctx.strokeStyle = theme.grid;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, baseY);
+    ctx.lineTo(width - pad.right, baseY);
+    ctx.stroke();
+}
+
+function resolveSelectedExpensesWeek() {
+    if (!expensesWeekInput) {
+        return 3;
+    }
+    const value = Number.parseInt(expensesWeekInput.value, 10);
+    if (Number.isNaN(value)) {
+        return 3;
+    }
+    return Math.max(1, Math.min(52, value));
+}
+
+function resolveObjectiveValue() {
+    if (!expensesObjectiveInput) {
+        return 0;
+    }
+    const value = Number.parseFloat(expensesObjectiveInput.value);
+    if (Number.isNaN(value)) {
+        return 0;
+    }
+    return Math.max(0, value);
+}
+
+function refreshExpensesChartsFromState() {
+    if (!latestExpensesSeries) {
+        return;
+    }
+    const weeks = latestExpensesSeries.weeks || [];
+    const predictions = latestExpensesSeries.predictions || [];
+    const selectedWeek = resolveSelectedExpensesWeek();
+    const objective = resolveObjectiveValue();
+
+    let selectedPrediction = null;
+    (latestExpensesSeries.points || []).forEach(point => {
+        if (Number(point.week_of_year) === selectedWeek && typeof point.prediction === "number") {
+            selectedPrediction = point.prediction;
+        }
+    });
+    if (selectedPrediction === null && predictions.length) {
+        selectedPrediction = predictions[Math.min(predictions.length - 1, 0)];
+    }
+
+    drawExpensesTimeline(weeks, predictions, selectedWeek);
+    drawExpensesCompare(selectedPrediction || 0, objective);
+}
+
+function fetchExpensesSeries() {
+    if (!expensesStatus || !expensesCountrySelect) {
+        return Promise.resolve();
+    }
+
+    const country = String(expensesCountrySelect.value || "").trim().toUpperCase();
+    if (!country) {
+        expensesStatus.textContent = "Selectionnez un pays";
+        return Promise.resolve();
+    }
+
+    const season = String(expensesSeasonInput?.value || "").trim();
+    const week = resolveSelectedExpensesWeek();
+    const query = new URLSearchParams({
+        country,
+        year: String(currentYear),
+    });
+    if (season) {
+        query.set("season", season);
+    }
+    if (selectedWeeks.length > 0) {
+        query.set("weeks", selectedWeeks.join(","));
+    }
+
+    expensesStatus.textContent = "Chargement...";
+    return fetchJsonCached(`${API_URL}/api/predict/expenses/series?${query.toString()}`)
+        .then(payload => {
+            latestExpensesSeries = {
+                weeks: normalizeWeeksOrder(payload.weeks || []),
+                predictions: payload.predictions || [],
+                points: payload.points || [],
+                country,
+                season: season || null,
+            };
+
+            const rankByWeek = new Map((payload.weeks || []).map((w, i) => [String(w).toUpperCase(), i]));
+            latestExpensesSeries.predictions = latestExpensesSeries.weeks.map(weekLabel => {
+                const idx = rankByWeek.get(String(weekLabel).toUpperCase());
+                return typeof idx === "number" ? payload.predictions?.[idx] : null;
+            });
+            latestExpensesSeries.points = latestExpensesSeries.weeks.map(weekLabel => {
+                const idx = rankByWeek.get(String(weekLabel).toUpperCase());
+                return typeof idx === "number" ? payload.points?.[idx] : null;
+            }).filter(Boolean);
+
+            refreshExpensesChartsFromState();
+
+            const objective = resolveObjectiveValue();
+            expensesStatus.textContent = `${country} - ${latestExpensesSeries.weeks.length} semaines (${sourceLabel(payload.data_source)}) - S${week} vs objectif ${formatNumber(objective)} €`;
+            appendDebugLine("/api/predict/expenses/series", {
+                country,
+                season,
+                year: currentYear,
+                weeks: latestExpensesSeries.weeks.length,
+                source: payload.data_source,
+            });
+        })
+        .catch(error => {
+            latestExpensesSeries = null;
+            drawExpensesTimeline([], [], week);
+            drawExpensesCompare(0, resolveObjectiveValue());
+            expensesStatus.textContent = "Erreur chargement depenses";
+            appendDebugLine("/api/predict/expenses/series error", { message: error?.message || "unknown" });
+        });
+}
+
+function fetchExpensesCountries() {
+    if (!expensesStatus || !expensesCountrySelect) {
+        return Promise.resolve();
+    }
+
+    expensesStatus.textContent = "Chargement pays...";
+    return fetchJsonCached(`${API_URL}/api/expenses/countries`)
+        .then(payload => {
+            expensesCountries = payload.countries || [];
+            expensesCountrySelect.innerHTML = expensesCountries
+                .map(country => `<option value="${country}">${country}</option>`)
+                .join("");
+
+            if (!expensesCountries.length) {
+                expensesStatus.textContent = "Aucun pays disponible";
+                return;
+            }
+
+            if (!expensesSeasonInput.value) {
+                expensesSeasonInput.value = "H26";
+            }
+
+            const preferred = ["GBR", "DEU", "BEL", "CHE", "NLD"];
+            const defaultCountry = preferred.find(code => expensesCountries.includes(code)) || expensesCountries[0];
+            expensesCountrySelect.value = defaultCountry;
+            fetchExpensesSeries();
+        })
+        .catch(error => {
+            expensesStatus.textContent = "Erreur chargement pays";
+            appendDebugLine("/api/expenses/countries error", { message: error?.message || "unknown" });
+        });
+}
+
+function initExpensesPanel() {
+    if (!expensesApplyBtn || !expensesCountrySelect || !expensesStatus) {
+        return;
+    }
+
+    expensesApplyBtn.addEventListener("click", () => {
+        fetchExpensesSeries();
+    });
+
+    expensesCountrySelect.addEventListener("change", () => {
+        fetchExpensesSeries();
+    });
+
+    if (expensesWeekInput) {
+        expensesWeekInput.addEventListener("input", () => {
+            refreshExpensesChartsFromState();
+        });
+    }
+
+    if (expensesObjectiveInput) {
+        expensesObjectiveInput.addEventListener("input", () => {
+            refreshExpensesChartsFromState();
+        });
+    }
+
+    fetchExpensesCountries();
 }
 
 function fetchGlobalMlTrend() {
@@ -937,6 +1260,7 @@ function initGlobalYearSelector() {
         fetchKpiData();
         fetchStations();
         fetchGlobalHolidays();
+        fetchExpensesSeries();
     });
 }
 
@@ -1373,6 +1697,7 @@ fetch("data/departements.geojson")
         initThemeToggle();
         initUiToggles();
         initMlOptions();
+        initExpensesPanel();
         initGlobalYearSelector();
         initPanelResize();
         checkSnowflakeStatus();
@@ -1389,4 +1714,5 @@ fetch("data/departements.geojson")
 window.addEventListener("resize", () => {
     fetchGlobalHolidays();
     fetchGlobalMlTrend();
+    refreshExpensesChartsFromState();
 });

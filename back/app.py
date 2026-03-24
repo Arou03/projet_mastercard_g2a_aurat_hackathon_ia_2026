@@ -476,6 +476,102 @@ def predict_expenses_context_endpoint():
             "traceback": traceback.format_exc()
         }), 500
 
+
+@app.route("/api/expenses/countries", methods=["GET"])
+def expenses_countries_endpoint():
+    cache_key = "api_expenses_countries"
+    cached_payload, hit = get_cache(cache_key)
+    if hit:
+        return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
+
+    try:
+        result = ml_service.list_expenses_countries()
+        payload = {
+            "success": True,
+            "countries": result.get("countries", []),
+            "source_table": result.get("source_table"),
+            "data_source": "snowflake",
+        }
+        set_cache(cache_key, payload)
+        return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
+    except Exception as exc:
+        return jsonify({
+            "success": False,
+            "error": "Impossible de récupérer la liste des pays.",
+            "details": str(exc),
+        }), 500
+
+
+@app.route("/api/predict/expenses/series", methods=["GET"])
+def predict_expenses_series_endpoint():
+    try:
+        country_code = (
+            request.args.get("country")
+            or request.args.get("pays")
+            or request.args.get("code_pays")
+            or ""
+        ).strip().upper()
+        if not country_code:
+            return jsonify({"success": False, "error": "Paramètre manquant: country"}), 400
+
+        season = (request.args.get("season") or request.args.get("saison") or "").strip()
+        year_value = (request.args.get("year") or "").strip()
+        year = int(year_value) if year_value.isdigit() else None
+        selected_weeks = parse_weeks_param(request.args.get("weeks", ""))
+
+        overrides = {}
+        for key, value in request.args.items():
+            if key.startswith("feat_"):
+                feature_name = key[len("feat_"):].strip().upper()
+                if feature_name:
+                    overrides[feature_name] = value
+
+        cache_key = (
+            f"api_predict_expenses_series:{country_code}:{season or 'NONE'}:{year if year is not None else 'NONE'}:"
+            f"{','.join(selected_weeks) if selected_weeks else 'ALL'}:"
+            f"{';'.join([f'{k}={overrides[k]}' for k in sorted(overrides.keys())]) if overrides else 'NO_OVERRIDES'}"
+        )
+        cached_payload, hit = get_cache(cache_key)
+        if hit:
+            return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
+
+        result = ml_service.predict_expenses_series(
+            country_code=country_code,
+            season=season or None,
+            year=year,
+            selected_weeks=selected_weeks,
+            overrides=overrides,
+        )
+
+        payload = {
+            "success": True,
+            "country": country_code,
+            "season": season or None,
+            "year": year,
+            "weeks": result.get("weeks", []),
+            "predictions": result.get("predictions", []),
+            "points": result.get("points", []),
+            "source_table": result.get("source_table"),
+            "overrides": overrides,
+            "data_source": "ml_prediction",
+        }
+        set_cache(cache_key, payload)
+        return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
+
+    except LookupError as exc:
+        return jsonify({
+            "success": False,
+            "error": "Aucune série disponible pour ce contexte.",
+            "details": str(exc),
+        }), 404
+    except Exception as exc:
+        return jsonify({
+            "success": False,
+            "error": "Erreur inattendue lors de la prédiction des dépenses par série.",
+            "details": str(exc),
+            "traceback": traceback.format_exc(),
+        }), 500
+
 # --- ROUTES DE DIAGNOSTIC SNOWFLAKE ---
 
 @app.route("/api/snowflake/status")
