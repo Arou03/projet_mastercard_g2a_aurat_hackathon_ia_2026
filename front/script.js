@@ -575,6 +575,37 @@ async function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
     }
 }
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchJsonWithRetry(url, timeoutMs = FETCH_TIMEOUT_MS, maxRetries = 2) {
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        try {
+            const response = await fetchWithTimeout(url, timeoutMs);
+            if (!response.ok) {
+                const isTransient = [502, 503, 504].includes(response.status);
+                if (isTransient && attempt < maxRetries) {
+                    await sleep(700 * (attempt + 1));
+                    continue;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+            if (attempt >= maxRetries) {
+                throw lastError;
+            }
+            await sleep(700 * (attempt + 1));
+        }
+    }
+
+    throw lastError || new Error("Unknown network error");
+}
+
 function fetchJsonCached(url, timeoutMs = FETCH_TIMEOUT_MS, ttlMs = CLIENT_CACHE_TTL_MS) {
     const now = Date.now();
     const cached = clientResponseCache.get(url);
@@ -587,13 +618,7 @@ function fetchJsonCached(url, timeoutMs = FETCH_TIMEOUT_MS, ttlMs = CLIENT_CACHE
         return existing;
     }
 
-    const promise = fetchWithTimeout(url, timeoutMs)
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
-            return res.json();
-        })
+    const promise = fetchJsonWithRetry(url, timeoutMs)
         .then(data => {
             clientResponseCache.set(url, { data, expiresAt: Date.now() + ttlMs });
             return data;
