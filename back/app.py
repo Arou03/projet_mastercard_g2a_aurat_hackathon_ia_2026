@@ -2,7 +2,6 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import traceback
 import os
-import math
 
 # Imports de notre nouvelle architecture modulaire
 from config import VALID_KPIS, CACHE_TTL_SECONDS, DEPARTMENT_KPIS, SNOWFLAKE_SCHEMA_PUBLIC, SNOWFLAKE_FACT_SCHEMA, SNOWFLAKE_DIM_SCHEMA, SNOWFLAKE_SCHEMA_REF, SNOWFLAKE_QUERY_TIMEOUT_SECONDS
@@ -16,94 +15,6 @@ from services import kpi_service, holiday_service, geo_service, ml_service
 
 app = Flask(__name__)
 CORS(app)  # Autorise les requêtes du front
-
-DEFAULT_EXPENSES_COUNTRIES = [
-    "GBR", "DEU", "BEL", "CHE", "NLD", "ESP", "ITA", "USA", "CAN", "IRL", "PRT", "POL"
-]
-
-
-def _to_week_int(week_label):
-    text = str(week_label or "").strip().upper()
-    if text.startswith("S") and text[1:].isdigit():
-        value = int(text[1:])
-        return value if 1 <= value <= 52 else None
-    if text.isdigit():
-        value = int(text)
-        return value if 1 <= value <= 52 else None
-    return None
-
-
-def _selected_week_numbers(selected_weeks):
-    values = []
-    for item in (selected_weeks or []):
-        value = _to_week_int(item)
-        if value is not None:
-            values.append(value)
-    unique_sorted = sorted(set(values))
-    return unique_sorted if unique_sorted else list(range(1, 53))
-
-
-def _predict_expenses_series_fallback(country_code, season=None, year=None, selected_weeks=None, overrides=None):
-    week_numbers = _selected_week_numbers(selected_weeks)
-    points = []
-    country_seed = sum(ord(char) for char in str(country_code or ""))
-    season_seed = sum(ord(char) for char in str(season or ""))
-    year_value = int(year) if isinstance(year, int) else 2024
-
-    for week in week_numbers:
-        month = max(1, min(12, int(((week - 1) / 4.35) + 1)))
-        baseline = 1_800_000 + ((country_seed * 97 + season_seed * 31 + year_value * 13) % 850_000)
-        seasonality = 260_000 * math.sin((week / 52) * 2 * math.pi)
-        lag_core = baseline + (seasonality * 0.65)
-        lag_prev = baseline + (seasonality * 0.55)
-        pct_change = ((lag_core - lag_prev) / lag_prev) if lag_prev else 0.0
-
-        features = {
-            "WEEK_OF_YEAR": float(week),
-            "MONTH": float(month),
-            "JOURS_ANTICIPATION": float(12 + ((country_seed + week) % 18)),
-            "PAYS_AVG_DEPENSES": float(baseline),
-            "PAYS_STD_DEPENSES": float(320_000 + ((country_seed + season_seed + week * 11) % 210_000)),
-            "HAS_HOLIDAY": float(1 if week in {1, 2, 3, 8, 9, 10, 51, 52} else 0),
-            "LAG_1": float(lag_core),
-            "LAG_2": float(lag_prev),
-            "ROLLING_MEAN_3": float((lag_core + lag_prev + baseline) / 3),
-            "PCT_CHANGE": float(pct_change),
-        }
-
-        for key, value in (overrides or {}).items():
-            normalized_key = str(key).strip().upper()
-            if normalized_key in features:
-                try:
-                    features[normalized_key] = float(value)
-                except Exception:
-                    pass
-
-        try:
-            prediction = float(ml_service.predict_expenses(features))
-            feature_source = "fallback_model"
-        except Exception:
-            prediction = float(max(0.0, baseline + seasonality))
-            feature_source = "fallback_synthetic"
-
-        points.append({
-            "week_of_year": week,
-            "week": f"S{week}",
-            "prediction": round(prediction, 2),
-            "feature_source": feature_source,
-        })
-
-    points.sort(key=lambda item: item["week_of_year"])
-    return {
-        "country": country_code,
-        "season": season or None,
-        "year": year,
-        "weeks": [item["week"] for item in points],
-        "predictions": [item["prediction"] for item in points],
-        "points": points,
-        "source_table": "fallback_context",
-        "data_source": "ml_prediction",
-    }
 
 @app.route("/")
 def home():
@@ -574,21 +485,13 @@ def expenses_countries_endpoint():
         return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
 
     try:
-        result = None
-        if hasattr(ml_service, "list_expenses_countries"):
-            result = ml_service.list_expenses_countries()
-        if not result:
-            result = {
-                "countries": DEFAULT_EXPENSES_COUNTRIES,
-                "source_table": "fallback_static",
-            }
-
-        countries = result.get("countries") or DEFAULT_EXPENSES_COUNTRIES
+        result = ml_service.list_expenses_countries()
+        countries = result.get("countries") or []
         payload = {
             "success": True,
             "countries": countries,
             "source_table": result.get("source_table"),
-            "data_source": "snowflake" if result.get("source_table") not in {"fallback_static", None} else "fallback",
+            "data_source": result.get("data_source", "snowflake"),
         }
         set_cache(cache_key, payload)
         return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
@@ -633,24 +536,13 @@ def predict_expenses_series_endpoint():
         if hit:
             return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
 
-        if hasattr(ml_service, "predict_expenses_series"):
-            result = ml_service.predict_expenses_series(
-                country_code=country_code,
-                season=season or None,
-                year=year,
-                selected_weeks=selected_weeks,
-                overrides=overrides,
-            )
-            resolved_data_source = "ml_prediction"
-        else:
-            result = _predict_expenses_series_fallback(
-                country_code=country_code,
-                season=season or None,
-                year=year,
-                selected_weeks=selected_weeks,
-                overrides=overrides,
-            )
-            resolved_data_source = result.get("data_source", "fallback")
+        result = ml_service.predict_expenses_series(
+            country_code=country_code,
+            season=season or None,
+            year=year,
+            selected_weeks=selected_weeks,
+            overrides=overrides,
+        )
 
         payload = {
             "success": True,
@@ -662,7 +554,7 @@ def predict_expenses_series_endpoint():
             "points": result.get("points", []),
             "source_table": result.get("source_table"),
             "overrides": overrides,
-            "data_source": resolved_data_source,
+            "data_source": result.get("data_source", "ml_prediction"),
         }
         set_cache(cache_key, payload)
         return jsonify({**payload, "cache": {"payload_hit": False, "ttl_seconds": CACHE_TTL_SECONDS}}), 200
