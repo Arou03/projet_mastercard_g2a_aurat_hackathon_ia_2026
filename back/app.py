@@ -213,36 +213,37 @@ def global_frequentation_data():
     if hit:
         return jsonify({**cached_payload, "cache": {"payload_hit": True, "ttl_seconds": CACHE_TTL_SECONDS}})
 
-    data_source = "mock"
+    if not is_snowflake_configured():
+        return jsonify({
+            "error": "Snowflake non configure: impossible de fournir des donnees reelles pour /api/global/frequentation",
+            "data_source": "error",
+            "missing_env_vars": get_missing_required_env_vars(),
+        }), 503
+
     try:
-        if is_snowflake_configured():
-            base_data = kpi_service.fetch_global_frequentation_from_snowflake(2024, selected_weeks)
-            payload = kpi_service.build_global_frequentation_multi_from_base(
-                base_data.get("weeks", []),
-                base_data.get("values", []),
-                requested_years,
-                ml_params,
-            )
-            data_source = "snowflake" if all(y == 2024 for y in requested_years) else "ml_prediction"
-        else:
-            base_data = kpi_service.build_mock_global_frequentation(2024, selected_weeks)
-            payload = kpi_service.build_global_frequentation_multi_from_base(
-                base_data.get("weeks", []),
-                base_data.get("values", []),
-                requested_years,
-                ml_params,
-            )
-            data_source = "mock" if all(y == 2024 for y in requested_years) else "ml_prediction"
-    except Exception as exc:
-        set_last_error(str(exc))
-        base_data = kpi_service.build_mock_global_frequentation(2024, selected_weeks)
+        base_data = kpi_service.fetch_global_frequentation_from_snowflake(2024, selected_weeks)
+        weeks = base_data.get("weeks", [])
+        values = base_data.get("values", [])
+        if not weeks or not values:
+            return jsonify({
+                "error": "Aucune donnee reelle disponible depuis Snowflake pour /api/global/frequentation",
+                "data_source": "error",
+            }), 503
+
         payload = kpi_service.build_global_frequentation_multi_from_base(
-            base_data.get("weeks", []),
-            base_data.get("values", []),
+            weeks,
+            values,
             requested_years,
             ml_params,
         )
-        data_source = "mock" if all(y == 2024 for y in requested_years) else "ml_prediction"
+        data_source = "snowflake" if all(y == 2024 for y in requested_years) else "ml_prediction"
+    except Exception as exc:
+        set_last_error(str(exc))
+        return jsonify({
+            "error": "Echec lecture Snowflake pour /api/global/frequentation",
+            "details": str(exc),
+            "data_source": "error",
+        }), 503
 
     payload["selected_year"] = year
     payload["data_source"] = data_source
