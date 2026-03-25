@@ -82,7 +82,6 @@ const mlApplyOptionsBtn = document.getElementById("mlApplyOptionsBtn");
 const expensesStatus = document.getElementById("expensesStatus");
 const expensesCountrySelect = document.getElementById("expensesCountrySelect");
 const expensesSeasonInput = document.getElementById("expensesSeasonInput");
-const expensesWeekInput = document.getElementById("expensesWeekInput");
 const expensesApplyBtn = document.getElementById("expensesApplyBtn");
 const expensesTimelineChart = document.getElementById("expensesTimelineChart");
 const debugToggle = document.getElementById("debugToggle");
@@ -556,7 +555,7 @@ function drawGlobalMlTrend(weeks, series) {
     bindCurveHover(globalMlCanvas, globalMlHoverPoints);
 }
 
-function drawExpensesTimeline(weeks, predictions, selectedWeek) {
+function drawExpensesTimeline(weeks, predictions) {
     if (!expensesTimelineChart) {
         return;
     }
@@ -593,7 +592,6 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
     const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
 
     const lineColor = document.body.classList.contains("light-mode") ? "#086cb2" : "#7be8ff";
-    const selectedPointColor = document.body.classList.contains("light-mode") ? "#d14247" : "#ffd37d";
 
     ctx.strokeStyle = lineColor;
     ctx.lineWidth = 2.6;
@@ -622,14 +620,11 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
         if (typeof value !== "number" || Number.isNaN(value)) {
             return;
         }
-        const weekText = String(weeks[index] || "").toUpperCase();
-        const weekNumber = toWeekNumber(weekText);
-        const isSelected = Number.isFinite(selectedWeek) && weekNumber === selectedWeek;
         const x = xFromIndex(index);
         const y = yFromValue(value);
         ctx.beginPath();
-        ctx.fillStyle = isSelected ? selectedPointColor : lineColor;
-        ctx.arc(x, y, isSelected ? 5 : 3.4, 0, Math.PI * 2);
+        ctx.fillStyle = lineColor;
+        ctx.arc(x, y, 3.8, 0, Math.PI * 2);
         ctx.fill();
 
         hoverPoints.push({
@@ -662,26 +657,14 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
     bindCurveHover(expensesTimelineChart, expensesHoverPoints, "€");
 }
 
-function resolveSelectedExpensesWeek() {
-    if (!expensesWeekInput) {
-        return 3;
-    }
-    const value = Number.parseInt(expensesWeekInput.value, 10);
-    if (Number.isNaN(value)) {
-        return 3;
-    }
-    return Math.max(1, Math.min(52, value));
-}
-
 function refreshExpensesChartsFromState() {
     if (!latestExpensesSeries) {
         return;
     }
     const weeks = latestExpensesSeries.weeks || [];
     const predictions = latestExpensesSeries.predictions || [];
-    const selectedWeek = resolveSelectedExpensesWeek();
 
-    drawExpensesTimeline(weeks, predictions, selectedWeek);
+    drawExpensesTimeline(weeks, predictions);
 }
 
 function fetchExpensesSeries() {
@@ -741,7 +724,7 @@ function fetchExpensesSeries() {
         })
         .catch(error => {
             latestExpensesSeries = null;
-            drawExpensesTimeline([], [], resolveSelectedExpensesWeek());
+            drawExpensesTimeline([], []);
             expensesStatus.textContent = "Erreur chargement depenses";
             appendDebugLine("/api/predict/expenses/series error", { message: error?.message || "unknown" });
         });
@@ -772,7 +755,13 @@ function fetchExpensesCountries() {
             const preferred = ["GBR", "DEU", "BEL", "CHE", "NLD"];
             const defaultCountry = preferred.find(code => expensesCountries.includes(code)) || expensesCountries[0];
             expensesCountrySelect.value = defaultCountry;
-            fetchExpensesSeries();
+
+            // Wait for KPI week filters before first expenses request to avoid loading all 52 weeks on first paint.
+            if (selectedWeeks.length > 0) {
+                fetchExpensesSeries();
+            } else {
+                expensesStatus.textContent = "Selectionnez un filtre pour charger les depenses";
+            }
         })
         .catch(error => {
             expensesStatus.textContent = "Erreur chargement pays";
@@ -792,12 +781,6 @@ function initExpensesPanel() {
     expensesCountrySelect.addEventListener("change", () => {
         fetchExpensesSeries();
     });
-
-    if (expensesWeekInput) {
-        expensesWeekInput.addEventListener("input", () => {
-            refreshExpensesChartsFromState();
-        });
-    }
 
     if (expensesSeasonInput) {
         expensesSeasonInput.addEventListener("change", () => {
@@ -1652,6 +1635,7 @@ function fetchKpiData() {
             }
             checkSnowflakeStatus();
             fetchGlobalMlTrend();
+            fetchExpensesSeries();
         })
         .catch(error => {
             if (error && error.name === "AbortError") {

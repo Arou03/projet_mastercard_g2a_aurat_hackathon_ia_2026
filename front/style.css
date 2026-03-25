@@ -749,7 +749,7 @@ body.light-mode .holiday-tooltip {
 
 .expenses-controls {
     display: grid;
-    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
     gap: 10px;
     align-items: end;
     margin-bottom: 10px;
