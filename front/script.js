@@ -725,6 +725,17 @@ function initExpensesPanel() {
         });
     }
 
+    if (expensesSeasonInput) {
+        expensesSeasonInput.addEventListener("change", () => {
+            fetchExpensesSeries();
+        });
+        expensesSeasonInput.addEventListener("keydown", event => {
+            if (event.key === "Enter") {
+                fetchExpensesSeries();
+            }
+        });
+    }
+
     fetchExpensesCountries();
 }
 
