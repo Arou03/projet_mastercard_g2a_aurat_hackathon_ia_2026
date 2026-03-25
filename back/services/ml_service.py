@@ -172,32 +172,92 @@ def _context_adjustment_factor(country_code, season=None, year=None):
     return 0.92 + (raw / 100.0)  # 0.92 .. 1.08
 
 
+def _country_baselines(country_code):
+    profiles = {
+        "GBR": {"anticipation": 170, "avg": 3_250_000, "std": 720_000},
+        "DEU": {"anticipation": 145, "avg": 2_950_000, "std": 680_000},
+        "BEL": {"anticipation": 180, "avg": 2_620_000, "std": 610_000},
+        "NLD": {"anticipation": 165, "avg": 2_880_000, "std": 640_000},
+        "CHE": {"anticipation": 150, "avg": 3_100_000, "std": 700_000},
+        "USA": {"anticipation": 120, "avg": 3_750_000, "std": 950_000},
+        "CAN": {"anticipation": 160, "avg": 2_700_000, "std": 620_000},
+        "ESP": {"anticipation": 95, "avg": 2_150_000, "std": 520_000},
+        "ITA": {"anticipation": 110, "avg": 2_300_000, "std": 560_000},
+        "POL": {"anticipation": 100, "avg": 1_980_000, "std": 500_000},
+    }
+    key = str(country_code or "").upper().strip()
+    if key in profiles:
+        return profiles[key]
+
+    seed = sum(ord(char) for char in key)
+    return {
+        "anticipation": 90 + (seed % 95),
+        "avg": 1_900_000 + ((seed * 19) % 1_400_000),
+        "std": 420_000 + ((seed * 11) % 420_000),
+    }
+
+
+def _holiday_weeks_for_country(country_code, season=None):
+    # Indicative school holiday windows by market to shape demand profile.
+    base = {
+        "FRA": {1, 2, 7, 8, 9, 10, 14, 15, 51, 52},
+        "GBR": {1, 2, 7, 8, 14, 15, 16, 29, 30, 43, 44, 51, 52},
+        "DEU": {1, 2, 7, 8, 9, 13, 14, 15, 30, 31, 42, 43, 51, 52},
+        "BEL": {1, 2, 8, 9, 10, 14, 15, 30, 31, 44, 51, 52},
+        "NLD": {1, 2, 8, 9, 10, 17, 18, 29, 30, 43, 44, 51, 52},
+        "CHE": {1, 2, 8, 9, 10, 14, 15, 16, 30, 31, 42, 51, 52},
+        "USA": {1, 2, 11, 12, 13, 22, 23, 24, 26, 27, 47, 51, 52},
+        "CAN": {1, 2, 8, 9, 10, 12, 13, 26, 27, 30, 51, 52},
+        "ESP": {1, 2, 13, 14, 15, 31, 32, 33, 51, 52},
+        "ITA": {1, 2, 8, 9, 13, 14, 15, 32, 33, 34, 51, 52},
+        "POL": {1, 2, 4, 5, 6, 7, 8, 25, 26, 51, 52},
+    }
+
+    weeks = set(base.get(str(country_code or "").upper().strip(), {1, 2, 8, 9, 14, 15, 51, 52}))
+    season_text = str(season or "").upper().strip()
+
+    # Winter season: emphasize Jan-Mar / year-end.
+    if season_text.startswith("H"):
+        weeks.update({1, 2, 3, 7, 8, 9, 10, 14, 15, 51, 52})
+    # Summer season: de-emphasize winter peaks.
+    if season_text.startswith("E"):
+        weeks = {w for w in weeks if w not in {1, 2, 3, 7, 8, 9, 10, 14, 15, 51, 52}}
+        weeks.update({26, 27, 28, 29, 30, 31, 32, 33})
+
+    return weeks
+
+
 def _build_synthetic_expenses_series(country_code, season=None, year=None, selected_weeks=None, overrides=None):
     week_numbers = _selected_week_numbers(selected_weeks)
     points = []
-    country_seed = sum(ord(char) for char in str(country_code or ""))
-    season_seed = sum(ord(char) for char in str(season or ""))
+    country_seed = sum(ord(char) for char in str(country_code or "").upper())
+    season_seed = sum(ord(char) for char in str(season or "").upper())
     year_value = int(year) if isinstance(year, int) else 2024
     context_factor = _context_adjustment_factor(country_code, season=season, year=year_value)
+    baselines = _country_baselines(country_code)
+    holiday_weeks = _holiday_weeks_for_country(country_code, season=season)
+
+    lag_1 = float(baselines["avg"])
+    lag_2 = float(baselines["avg"] * 0.985)
 
     for week in week_numbers:
         month = max(1, min(12, int(((week - 1) / 4.35) + 1)))
-        baseline = 1_800_000 + ((country_seed * 97 + season_seed * 31 + year_value * 13) % 850_000)
-        seasonality = 260_000 * math.sin((week / 52) * 2 * math.pi)
-        lag_core = baseline + (seasonality * 0.65)
-        lag_prev = baseline + (seasonality * 0.55)
-        pct_change = ((lag_core - lag_prev) / lag_prev) if lag_prev else 0.0
+        baseline = float(baselines["avg"] + ((country_seed * 97 + season_seed * 31 + year_value * 13) % 220_000))
+        seasonality = float(260_000 * math.sin((week / 52) * 2 * math.pi))
+        holiday_boost = 0.11 if week in holiday_weeks else -0.03
+        pct_change = ((lag_1 - lag_2) / lag_2) if lag_2 else 0.0
+        rolling_mean_3 = ((lag_1 + lag_2 + baseline) / 3.0)
 
         features = {
             "WEEK_OF_YEAR": float(week),
             "MONTH": float(month),
-            "JOURS_ANTICIPATION": float(12 + ((country_seed + week) % 18)),
-            "PAYS_AVG_DEPENSES": float(baseline),
-            "PAYS_STD_DEPENSES": float(320_000 + ((country_seed + season_seed + week * 11) % 210_000)),
-            "HAS_HOLIDAY": float(1 if week in {1, 2, 3, 8, 9, 10, 51, 52} else 0),
-            "LAG_1": float(lag_core),
-            "LAG_2": float(lag_prev),
-            "ROLLING_MEAN_3": float((lag_core + lag_prev + baseline) / 3),
+            "JOURS_ANTICIPATION": float(baselines["anticipation"]),
+            "PAYS_AVG_DEPENSES": float(baselines["avg"]),
+            "PAYS_STD_DEPENSES": float(baselines["std"]),
+            "HAS_HOLIDAY": float(1 if week in holiday_weeks else 0),
+            "LAG_1": float(lag_1),
+            "LAG_2": float(lag_2),
+            "ROLLING_MEAN_3": float(rolling_mean_3),
             "PCT_CHANGE": float(pct_change),
         }
 
@@ -213,12 +273,16 @@ def _build_synthetic_expenses_series(country_code, season=None, year=None, selec
             prediction = float(predict_expenses(features))
             feature_source = "fallback_model"
         except Exception:
-            prediction = float(max(0.0, baseline + seasonality))
+            prediction = float(max(0.0, baseline + seasonality + (holiday_boost * baselines["std"])))
             feature_source = "fallback_synthetic"
 
         # Keep ML inference while preserving contextual sensitivity for country/season.
-        blended_anchor = float(max(0.0, baseline + seasonality))
+        blended_anchor = float(max(0.0, rolling_mean_3 + seasonality + (holiday_boost * baselines["std"])))
         prediction = max(0.0, ((prediction * 0.72) + (blended_anchor * 0.28)) * context_factor)
+
+        # Recursive lag update to make country/holiday dynamics impact subsequent weeks.
+        lag_2 = lag_1
+        lag_1 = prediction
 
         points.append({
             "week_of_year": week,
