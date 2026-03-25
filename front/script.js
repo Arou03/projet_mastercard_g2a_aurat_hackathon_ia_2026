@@ -113,6 +113,8 @@ let selectedMlYears = [...ML_YEAR_CHOICES];
 let mlCustomParams = [];
 let expensesCountries = [];
 let latestExpensesSeries = null;
+let globalMlHoverPoints = [];
+let expensesHoverPoints = [];
 const clientResponseCache = new Map();
 const inFlightRequests = new Map();
 
@@ -146,6 +148,52 @@ function hideHolidayTooltip() {
         return;
     }
     holidayTooltipEl.classList.add("hidden");
+}
+
+function bindCurveHover(canvas, hoverPoints, unit = "") {
+    if (!canvas) {
+        return;
+    }
+
+    const tooltip = ensureHolidayTooltip();
+    canvas.onmousemove = event => {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        let best = null;
+        let bestDistance = Number.POSITIVE_INFINITY;
+
+        (hoverPoints || []).forEach(point => {
+            const dx = x - point.x;
+            const dy = y - point.y;
+            const distance = Math.sqrt((dx * dx) + (dy * dy));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = point;
+            }
+        });
+
+        if (!best || bestDistance > 10) {
+            canvas.style.cursor = "default";
+            hideHolidayTooltip();
+            return;
+        }
+
+        canvas.style.cursor = "pointer";
+        const suffix = unit ? ` ${unit}` : "";
+        tooltip.innerHTML = `
+            <strong>${best.label}</strong><br>
+            ${best.week} : ${formatNumber(best.value)}${suffix}
+        `;
+        tooltip.style.left = `${event.clientX + 14}px`;
+        tooltip.style.top = `${event.clientY + 14}px`;
+        tooltip.classList.remove("hidden");
+    };
+
+    canvas.onmouseleave = () => {
+        canvas.style.cursor = "default";
+        hideHolidayTooltip();
+    };
 }
 
 function formatDisplayDate(value) {
@@ -437,6 +485,8 @@ function drawGlobalMlTrend(weeks, series) {
     };
     const yFromValue = value => pad.top + chartH - ((value - minValue) / range) * chartH;
 
+    const hoverPoints = [];
+
     (series || []).forEach((item, seriesIndex) => {
         const values = item.values || [];
         const isSelected = Number(item.year) === Number(currentYear);
@@ -468,6 +518,14 @@ function drawGlobalMlTrend(weeks, series) {
             ctx.fillStyle = seriesColor;
             ctx.arc(x, y, isSelected ? 4.2 : 3.2, 0, Math.PI * 2);
             ctx.fill();
+
+            hoverPoints.push({
+                x,
+                y,
+                week: String(weeks[index] || "-"),
+                value,
+                label: item.label || String(item.year || "Serie"),
+            });
         });
     });
 
@@ -484,15 +542,18 @@ function drawGlobalMlTrend(weeks, series) {
         ctx.fillText(String(weeks[index]), xFromIndex(index), height - 10);
     });
 
-    ctx.textAlign = "right";
-    ctx.fillText(formatNumber(minValue), pad.left - 8, pad.top + chartH + 4);
-    ctx.fillText(formatNumber(maxValue), pad.left - 8, pad.top + 4);
+    ctx.textAlign = "left";
+    ctx.fillText(formatNumber(minValue), 10, pad.top + chartH + 4);
+    ctx.fillText(formatNumber(maxValue), 10, pad.top + 4);
 
     if (globalMlLegend) {
         globalMlLegend.innerHTML = (series || [])
             .map((item, seriesIndex) => `<span class="legend-chip"><span class="legend-dot" style="background:${mlSeriesColor(seriesIndex, item.color)}"></span>${item.label || item.year}</span>`)
             .join("");
     }
+
+    globalMlHoverPoints = hoverPoints;
+    bindCurveHover(globalMlCanvas, globalMlHoverPoints);
 }
 
 function drawExpensesTimeline(weeks, predictions, selectedWeek) {
@@ -538,6 +599,8 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
     ctx.lineWidth = 2.6;
     ctx.beginPath();
     let started = false;
+    const hoverPoints = [];
+
     (predictions || []).forEach((value, index) => {
         if (typeof value !== "number" || Number.isNaN(value)) {
             return;
@@ -568,13 +631,21 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
         ctx.fillStyle = isSelected ? selectedPointColor : lineColor;
         ctx.arc(x, y, isSelected ? 5 : 3.4, 0, Math.PI * 2);
         ctx.fill();
+
+        hoverPoints.push({
+            x,
+            y,
+            week: String(weeks[index] || "-"),
+            value,
+            label: "Depenses predites",
+        });
     });
 
     ctx.fillStyle = theme.text;
     ctx.font = "12px Luciole, Segoe UI, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(`${formatNumber(minValue)} €`, pad.left - 8, pad.top + chartH + 4);
-    ctx.fillText(`${formatNumber(maxValue)} €`, pad.left - 8, pad.top + 4);
+    ctx.textAlign = "left";
+    ctx.fillText(`${formatNumber(minValue)} €`, 10, pad.top + chartH + 4);
+    ctx.fillText(`${formatNumber(maxValue)} €`, 10, pad.top + 4);
 
     ctx.textAlign = "center";
     const tickIndexes = [0, Math.floor((weeks.length - 1) / 3), Math.floor(((weeks.length - 1) * 2) / 3), Math.max(0, weeks.length - 1)];
@@ -586,6 +657,9 @@ function drawExpensesTimeline(weeks, predictions, selectedWeek) {
         seen.add(index);
         ctx.fillText(String(weeks[index]), xFromIndex(index), height - 10);
     });
+
+    expensesHoverPoints = hoverPoints;
+    bindCurveHover(expensesTimelineChart, expensesHoverPoints, "€");
 }
 
 function resolveSelectedExpensesWeek() {
